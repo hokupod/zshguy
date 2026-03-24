@@ -51,3 +51,11 @@ Set the `BASHGUY_MODEL` environment variable to use a different model. The defau
 ```bash
 export BASHGUY_MODEL=claude-haiku-4-5-20251001
 ```
+
+## License
+
+MIT
+
+## Author
+
+Yasuhiro Matsumoto (a.k.a. mattn)
