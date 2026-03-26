@@ -46,7 +46,79 @@ _zshguy_run_lms() {
     return 1
   fi
 
+  lms_output="$(_zshguy_normalize_model_output "$lms_output")" || return 1
+  _zshguy_validate_model_output "$lms_output" || return 1
   print -r -- "$lms_output"
+}
+
+_zshguy_normalize_model_output() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local raw_output=${1-}
+  local line
+  local -i in_think=0
+  local -a lines
+  local -a cleaned_lines
+
+  lines=("${(@f)raw_output}")
+
+  for line in "${lines[@]}"; do
+    line="${line//$'\r'/}"
+
+    if (( in_think )); then
+      if [[ "$line" == *'</think>'* ]]; then
+        in_think=0
+      fi
+      continue
+    fi
+
+    if [[ "$line" == *'<think>'* ]]; then
+      if [[ "$line" != *'</think>'* ]]; then
+        in_think=1
+      fi
+      continue
+    fi
+
+    line="${line//<|im_end|>/}"
+    cleaned_lines+=("$line")
+  done
+
+  while (( ${#cleaned_lines[@]} )) && [[ -z "${cleaned_lines[1]}" ]]; do
+    cleaned_lines=("${cleaned_lines[@]:1}")
+  done
+
+  while (( ${#cleaned_lines[@]} )) && [[ -z "${cleaned_lines[-1]}" ]]; do
+    cleaned_lines=("${cleaned_lines[@]:0:-1}")
+  done
+
+  if (( ${#cleaned_lines[@]} >= 2 )) &&
+    [[ "${cleaned_lines[1]}" == '```'* ]] &&
+    [[ "${cleaned_lines[-1]}" == '```' ]]; then
+    cleaned_lines=("${cleaned_lines[@]:1:${#cleaned_lines[@]}-2}")
+  fi
+
+  if (( ${#cleaned_lines[@]} > 1 )); then
+    cleaned_lines=("${cleaned_lines[-1]}")
+  fi
+
+  print -r -- "${(F)cleaned_lines}"
+}
+
+_zshguy_validate_model_output() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local output=${1-}
+
+  [[ -n "$output" ]] || return 1
+  [[ "$output" != *$'\n'* ]] || return 1
+  [[ "$output" != *'```'* ]] || return 1
+  [[ "$output" != *'<think>'* ]] || return 1
+  [[ "$output" != *'</think>'* ]] || return 1
+  [[ "$output" != *'<|im_end|>'* ]] || return 1
+
+  return 0
 }
 
 _zshguy_apply_insert() {
@@ -70,7 +142,7 @@ _zshguy_build_command_generation_system_prompt() {
   emulate -L zsh
   setopt local_options no_unset
 
-  print -r -- "You are a zsh command generator. The user describes what they want to do in natural language. Output ONLY a single zsh command (no explanation, no markdown, no code fences, no trailing newline). The command should work on macOS and Linux. Current directory: $(pwd)"
+  print -r -- "You are a zsh command generator for an interactive terminal widget. The user describes what they want to do in natural language. Output ONLY a single zsh command that directly and minimally satisfies the request. Do not explain. Do not use markdown. Do not use code fences. Do not include multiple options. Do not add extra transformations, compression, deletion, extraction, or side effects unless the user explicitly asked for them. Prefer common, simple commands that a human would naturally write. If the user asks to list or filter files, prefer straightforward tools such as find, ls, or grep. Interpret ambiguous requests conservatively. If the user asks to list files with a given extension, return a file-listing command for that extension, not an archive or conversion command. Examples: 'list only .sh files' -> 'find . -type f -name '\''*.sh'\''' ; 'extract a tar.gz archive' -> 'tar -xvf archive.tar.gz'. No trailing newline. The command should work on macOS and Linux. Current directory: $(pwd)"
 }
 
 _zshguy_build_insert_system_prompt() {
@@ -80,9 +152,9 @@ _zshguy_build_insert_system_prompt() {
   local prefix=${1-}
   local suffix=${2-}
 
-  print -r -- "You are a zsh command generator. The user has partially written a command line. The text before the cursor is: $prefix
+  print -r -- "You are a zsh command generator for an interactive terminal widget. The user has partially written a command line. The text before the cursor is: $prefix
 The text after the cursor is: $suffix
-Output ONLY the text to insert at the cursor position (no explanation, no markdown, no code fences, no trailing newline). The inserted text combined with the existing text should form a valid zsh command. Current directory: $(pwd)"
+Output ONLY the text to insert at the cursor position. Do not explain. Do not use markdown. Do not use code fences. Do not repeat the full command line. Do not change text outside the insertion. Keep the insertion minimal and directly relevant to the user's request. No trailing newline. The inserted text combined with the existing text should form a valid zsh command. Current directory: $(pwd)"
 }
 
 _zshguy_notify_tty() {

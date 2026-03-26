@@ -194,7 +194,7 @@ test_build_command_generation_system_prompt() {
   fi
 
   current_dir="$(pwd)"
-  expected="You are a zsh command generator. The user describes what they want to do in natural language. Output ONLY a single zsh command (no explanation, no markdown, no code fences, no trailing newline). The command should work on macOS and Linux. Current directory: $current_dir"
+  expected="You are a zsh command generator for an interactive terminal widget. The user describes what they want to do in natural language. Output ONLY a single zsh command that directly and minimally satisfies the request. Do not explain. Do not use markdown. Do not use code fences. Do not include multiple options. Do not add extra transformations, compression, deletion, extraction, or side effects unless the user explicitly asked for them. Prefer common, simple commands that a human would naturally write. If the user asks to list or filter files, prefer straightforward tools such as find, ls, or grep. Interpret ambiguous requests conservatively. If the user asks to list files with a given extension, return a file-listing command for that extension, not an archive or conversion command. Examples: 'list only .sh files' -> 'find . -type f -name '\''*.sh'\''' ; 'extract a tar.gz archive' -> 'tar -xvf archive.tar.gz'. No trailing newline. The command should work on macOS and Linux. Current directory: $current_dir"
 
   if ! actual="$(_zshguy_build_command_generation_system_prompt)"; then
     print -ru2 -- "FAIL: build command generation system prompt helper invocation failed"
@@ -216,9 +216,9 @@ test_build_insert_system_prompt() {
   fi
 
   current_dir="$(pwd)"
-  expected="You are a zsh command generator. The user has partially written a command line. The text before the cursor is: $prefix
+  expected="You are a zsh command generator for an interactive terminal widget. The user has partially written a command line. The text before the cursor is: $prefix
 The text after the cursor is: $suffix
-Output ONLY the text to insert at the cursor position (no explanation, no markdown, no code fences, no trailing newline). The inserted text combined with the existing text should form a valid zsh command. Current directory: $current_dir"
+Output ONLY the text to insert at the cursor position. Do not explain. Do not use markdown. Do not use code fences. Do not repeat the full command line. Do not change text outside the insertion. Keep the insertion minimal and directly relevant to the user's request. No trailing newline. The inserted text combined with the existing text should form a valid zsh command. Current directory: $current_dir"
 
   if ! actual="$(_zshguy_build_insert_system_prompt "$prefix" "$suffix")"; then
     print -ru2 -- "FAIL: build insert system prompt helper invocation failed"
@@ -259,6 +259,53 @@ test_run_lms_preserves_special_characters() {
   rm -f "$lms_capture_file"
   expected_lms_argv=(chat test-model -s "$system_prompt" -p "$user_prompt")
   assert_array_eq "run lms special characters" expected_lms_argv lms_argv || return 1
+}
+
+test_run_lms_strips_markdown_fences() {
+  local lms_output
+  local ZSHGUY_MODEL="test-model"
+
+  if ! assert_helper_available _zshguy_run_lms "run lms"; then
+    return 1
+  fi
+
+  lms() {
+    print -r -- '```zsh'
+    print -r -- 'ls -la'
+    print -r -- '```'
+  }
+
+  if ! lms_output="$(_zshguy_run_lms "sys" "user")"; then
+    print -ru2 -- "FAIL: run lms markdown fence normalization failed"
+    return 1
+  fi
+
+  assert_eq "ls -la" "$lms_output" "run lms strips markdown fences" || return 1
+}
+
+test_run_lms_strips_think_block_and_trailing_tokens() {
+  local lms_output
+  local ZSHGUY_MODEL="test-model"
+
+  if ! assert_helper_available _zshguy_run_lms "run lms"; then
+    return 1
+  fi
+
+  lms() {
+    print -r -- '<think>'
+    print -r -- 'hidden reasoning'
+    print -r -- '</think>'
+    print -r -- ''
+    print -r -- 'ls'
+    print -r -- '<|im_end|>'
+  }
+
+  if ! lms_output="$(_zshguy_run_lms "sys" "user")"; then
+    print -ru2 -- "FAIL: run lms think block normalization failed"
+    return 1
+  fi
+
+  assert_eq "ls" "$lms_output" "run lms strips think block and trailing tokens" || return 1
 }
 
 test_mode_for_buffer() {
@@ -637,6 +684,8 @@ main() {
   run_test test_build_command_generation_system_prompt
   run_test test_build_insert_system_prompt
   run_test test_run_lms_preserves_special_characters
+  run_test test_run_lms_strips_markdown_fences
+  run_test test_run_lms_strips_think_block_and_trailing_tokens
   run_test test_mode_for_buffer
   run_test test_apply_insert
   run_test test_handle_generation_error_preserves_buffer_and_cursor
