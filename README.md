@@ -1,56 +1,92 @@
-# bashguy
+# zshguy
 
-A shell widget that generates bash commands from natural language using Claude.
+A zsh widget that generates commands from natural language using `lms`.
 
-https://github.com/user-attachments/assets/f7d73d76-d7c5-437c-9ac9-8633795f8e3a
-
-Type what you want to do in plain English, and Claude generates the command and inserts it into your command line. If there's already partial input, it inserts a completion at the cursor position.
+Type what you want to do in plain English, and `zshguy` asks the model for a zsh command or an insertion at the cursor position.
 
 ## Requirements
 
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude` command)
-- Bash
+- `zsh` only
+- `lms` command from [LM Studio](https://lmstudio.ai/)
+- LM Studio must be started once and finish its first-run setup before `lms` will work reliably
+
+### Preflight
+
+Run `lms` once before using the widget and confirm it can reach your model:
+
+```zsh
+lms chat -p "ping"
+```
+
+If you set `ZSHGUY_MODEL`, run `lms chat "$ZSHGUY_MODEL" -p "ping"` instead.
 
 ## Installation
 
-Add the following to your `.bashrc`:
+Source the script from your `.zshrc`:
 
-```bash
-source /path/to/bashguy.sh
+```zsh
+source /path/to/zshguy.sh
 ```
+
+When sourced in an interactive shell, the script registers `zshguy-widget` with `zle -N`.
 
 ## Key Binding
 
-No key binding is set by default. Add a `bind` command after sourcing the script in your `.bashrc`:
+`zshguy` does not bind a key automatically. Add a manual `bindkey` mapping after sourcing the script:
 
-```bash
-source /path/to/bashguy.sh
-bind -x '"\C-g": _bashguy_widget'
+```zsh
+source /path/to/zshguy.sh
+bindkey '^X^J' zshguy-widget
 ```
 
-### Examples
+Other examples:
 
-| Key | bind command |
-|-----|-------------|
-| Ctrl+G | `bind -x '"\C-g": _bashguy_widget'` |
-| Ctrl+J | `bind -x '"\C-j": _bashguy_widget'` |
-| Ctrl+X Ctrl+G | `bind -x '"\C-x\C-g": _bashguy_widget'` |
+```zsh
+bindkey '^X^J' zshguy-widget
+bindkey '^X^G' zshguy-widget
+```
 
 ## Usage
 
-1. Press your bound key to get a `[bashguy]` prompt
-2. Describe what you want to do (e.g., `count the number of files in the current directory`)
-3. Claude generates the command and inserts it into your command line
+Press your bound key, then enter a prompt at the `[zshguy]` prompt.
 
-If you press the key with partial input on the command line, it inserts a completion at the cursor position.
+### Empty buffer
+
+If the command line is empty, `zshguy` generates a full zsh command.
+
+Example prompt:
+
+```text
+count the number of files in the current directory
+```
+
+### Existing input
+
+If you already have text on the command line, `zshguy` inserts text at the cursor position.
+
+Example buffer:
+
+```text
+git checkout 
+```
+
+Example prompt:
+
+```text
+main
+```
+
+If the prompt is empty or generation fails, the current buffer stays unchanged.
 
 ## Changing the Model
 
-Set the `BASHGUY_MODEL` environment variable to use a different model. The default is `claude-sonnet-4-20250514`.
+Set `ZSHGUY_MODEL` to choose a different LM Studio model name:
 
-```bash
-export BASHGUY_MODEL=claude-haiku-4-5-20251001
+```zsh
+export ZSHGUY_MODEL=llama-3.1-8b-instruct
 ```
+
+If `ZSHGUY_MODEL` is unset, `lms chat` uses its default model.
 
 ## License
 
@@ -58,4 +94,6 @@ MIT
 
 ## Author
 
-Yasuhiro Matsumoto (a.k.a. mattn)
+hokupod
+
+Originally based on [`bashguy`](https://github.com/mattn/bashguy) by Yasuhiro Matsumoto (a.k.a. mattn).
