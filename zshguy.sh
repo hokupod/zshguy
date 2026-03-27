@@ -168,78 +168,181 @@ _zshguy_notify_tty() {
   print -rn -- "$message" >/dev/tty 2>/dev/null || return 0
 }
 
-_zshguy_read_tty_prompt() {
+_zshguy_prompt_prefix() {
   emulate -L zsh
   setopt local_options no_unset
 
-  local prompt=${1-}
-  local saved_tty
-  local user_prompt
+  print -r -- "[zshguy] "
+}
 
-  saved_tty=$(stty -g </dev/tty) || return 1
-  stty sane </dev/tty || return 1
+_zshguy_clear_state() {
+  emulate -L zsh
+  setopt local_options no_unset
 
-  print -rn -- "$prompt" >/dev/tty || {
-    stty "$saved_tty" </dev/tty
-    return 1
-  }
+  typeset -g _zshguy_state=""
+  typeset -g _zshguy_saved_buffer=""
+  typeset -gi _zshguy_saved_cursor=0
+  typeset -g _zshguy_saved_mode=""
+}
 
-  if ! IFS= read -r user_prompt </dev/tty; then
-    stty "$saved_tty" </dev/tty
-    return 1
+_zshguy_begin_prompt_mode() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local prompt_prefix
+
+  prompt_prefix="$(_zshguy_prompt_prefix)" || return 1
+
+  typeset -g _zshguy_state="collecting_prompt"
+  typeset -g _zshguy_saved_buffer="${BUFFER-}"
+  typeset -gi _zshguy_saved_cursor=${CURSOR-0}
+  _zshguy_saved_mode="$(_zshguy_mode_for_buffer)" || return 1
+
+  BUFFER="$prompt_prefix"
+  CURSOR=${#BUFFER}
+}
+
+_zshguy_restore_saved_buffer() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  BUFFER=${_zshguy_saved_buffer-}
+  CURSOR=${_zshguy_saved_cursor-0}
+}
+
+_zshguy_extract_prompt_query() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local prompt_prefix
+
+  prompt_prefix="$(_zshguy_prompt_prefix)" || return 1
+
+  if [[ ${BUFFER-} == "$prompt_prefix"* ]]; then
+    print -r -- "${BUFFER#$prompt_prefix}"
+    return 0
   fi
 
-  stty "$saved_tty" </dev/tty || return 1
+  print -r -- "${BUFFER-}"
+}
 
-  print -r -- "$user_prompt"
+_zshguy_show_generating_buffer() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local user_prompt=${1-}
+  local prompt_prefix
+
+  prompt_prefix="$(_zshguy_prompt_prefix)" || return 1
+  typeset -g _zshguy_state="generating"
+  BUFFER="${prompt_prefix}${user_prompt} generating..."
+  CURSOR=${#BUFFER}
+}
+
+_zshguy_cancel() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  [[ -n ${_zshguy_state-} ]] || return 0
+
+  _zshguy_restore_saved_buffer
+  _zshguy_clear_state
+  _zshguy_redraw_prompt
+}
+
+_zshguy_redraw_prompt() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  [[ -o zle ]] || return 0
+
+  zle reset-prompt
+}
+
+_zshguy_accept_line() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local user_prompt
+  local system_prompt
+  local lms_output
+
+  if [[ ${_zshguy_state-} != "collecting_prompt" ]]; then
+    zle .accept-line
+    return 0
+  fi
+
+  user_prompt="$(_zshguy_extract_prompt_query)" || {
+    _zshguy_cancel
+    return 0
+  }
+
+  if [[ -z $user_prompt ]]; then
+    _zshguy_cancel
+    return 0
+  fi
+
+  if [[ ${_zshguy_saved_mode-} == "insert" ]]; then
+    system_prompt="$(_zshguy_build_insert_system_prompt \
+      "${_zshguy_saved_buffer:0:${_zshguy_saved_cursor-0}}" \
+      "${_zshguy_saved_buffer:${_zshguy_saved_cursor-0}}")" || return 0
+  else
+    system_prompt="$(_zshguy_build_command_generation_system_prompt)" || return 0
+  fi
+
+  _zshguy_show_generating_buffer "$user_prompt" || return 0
+  _zshguy_redraw_prompt
+
+  if ! lms_output="$(_zshguy_run_lms "$system_prompt" "$user_prompt")"; then
+    _zshguy_restore_saved_buffer
+    _zshguy_clear_state
+    _zshguy_redraw_prompt
+    _zshguy_handle_generation_error
+    return 0
+  fi
+
+  _zshguy_restore_saved_buffer
+  if [[ ${_zshguy_saved_mode-} == "insert" ]]; then
+    _zshguy_apply_insert "$lms_output"
+  else
+    BUFFER=$lms_output
+    CURSOR=${#BUFFER}
+  fi
+  _zshguy_clear_state
+  _zshguy_redraw_prompt
+
+  return 0
+}
+
+_zshguy_send_break() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  if [[ -n ${_zshguy_state-} ]]; then
+    _zshguy_cancel
+    return 0
+  fi
+
+  zle .send-break
 }
 
 _zshguy_widget() {
   emulate -L zsh
   setopt local_options no_unset
 
-  local tty_prompt='[zshguy] '
-  local user_prompt
-  local system_prompt
-  local lms_output
-  local prefix
-  local suffix
+  [[ -z ${_zshguy_state-} ]] || return 0
 
-  if ! user_prompt="$(_zshguy_read_tty_prompt "$tty_prompt")"; then
-    _zshguy_notify_tty $'\r\e[K'
-    _zshguy_handle_generation_error
-    return 0
-  fi
-
-  if [[ -z $user_prompt ]]; then
-    return 0
-  fi
-
-  if [[ -n ${BUFFER-} ]]; then
-    prefix=${BUFFER:0:$CURSOR}
-    suffix=${BUFFER:$CURSOR}
-    system_prompt="$(_zshguy_build_insert_system_prompt "$prefix" "$suffix")" || return 0
-  else
-    system_prompt="$(_zshguy_build_command_generation_system_prompt)" || return 0
-  fi
-
-  _zshguy_notify_tty "[zshguy] ${user_prompt} generating..."
-
-  if ! lms_output="$(_zshguy_run_lms "$system_prompt" "$user_prompt")"; then
-    _zshguy_notify_tty $'\r\e[K'
-    _zshguy_handle_generation_error
-    return 0
-  fi
-
-  _zshguy_notify_tty $'\r\e[K'
-
-  if [[ -n $lms_output ]]; then
-    _zshguy_apply_insert "$lms_output"
-  fi
+  _zshguy_begin_prompt_mode || return 0
+  _zshguy_redraw_prompt
 
   return 0
 }
 
 if [[ -o interactive ]]; then
+  _zshguy_clear_state
   zle -N zshguy-widget _zshguy_widget
+  zle -N zshguy-accept-line _zshguy_accept_line
+  zle -N zshguy-send-break _zshguy_send_break
+  zle -A zshguy-accept-line accept-line
+  zle -A zshguy-send-break send-break
 fi
