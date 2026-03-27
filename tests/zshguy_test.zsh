@@ -718,6 +718,126 @@ test_widget_cleans_prompt_line_on_tty_read_failure() {
   assert_eq "$expected_cursor" "$CURSOR" "widget cursor restored after cancel path" || return 1
 }
 
+test_delete_guard_blocks_prefix_deletion() {
+  local BUFFER="[zshguy] "
+  local -i CURSOR=9
+
+  if ! assert_helper_available _zshguy_backward_delete_char "backward delete char"; then
+    return 1
+  fi
+
+  zle() {
+    print -ru2 -- "FAIL: builtin backward delete should not run at prefix boundary"
+    return 1
+  }
+
+  typeset -g _zshguy_state="collecting_prompt"
+
+  if ! _zshguy_backward_delete_char; then
+    print -ru2 -- "FAIL: backward delete guard invocation failed"
+    return 1
+  fi
+
+  assert_eq "[zshguy] " "$BUFFER" "backward delete guard preserves prefix buffer" || return 1
+  assert_eq "9" "$CURSOR" "backward delete guard preserves prefix cursor" || return 1
+}
+
+test_delete_guard_allows_query_deletion() {
+  local BUFFER="[zshguy] abc"
+  local -i CURSOR=12
+
+  if ! assert_helper_available _zshguy_backward_delete_char "backward delete char"; then
+    return 1
+  fi
+
+  zle() {
+    if [[ "$1" != ".backward-delete-char" ]]; then
+      print -ru2 -- "FAIL: unexpected zle widget"
+      print -ru2 -- "  actual:   $1"
+      return 1
+    fi
+    BUFFER="${BUFFER:0:$(( CURSOR - 1 ))}${BUFFER:$CURSOR}"
+    CURSOR=$(( CURSOR - 1 ))
+  }
+
+  typeset -g _zshguy_state="collecting_prompt"
+
+  if ! _zshguy_backward_delete_char; then
+    print -ru2 -- "FAIL: backward delete invocation failed for query content"
+    return 1
+  fi
+
+  assert_eq "[zshguy] ab" "$BUFFER" "backward delete removes query character" || return 1
+  assert_eq "11" "$CURSOR" "backward delete updates cursor in query" || return 1
+}
+
+test_delete_guard_preserves_prefix_for_line_and_word_kills() {
+  local BUFFER="[zshguy] abc"
+  local -i CURSOR=12
+
+  if ! assert_helper_available _zshguy_backward_kill_word "backward kill word"; then
+    return 1
+  fi
+
+  zle() {
+    case "$1" in
+      .backward-kill-word|.kill-whole-line)
+        BUFFER=""
+        CURSOR=0
+        ;;
+      *)
+        print -ru2 -- "FAIL: unexpected zle widget"
+        print -ru2 -- "  actual:   $1"
+        return 1
+        ;;
+    esac
+  }
+
+  typeset -g _zshguy_state="collecting_prompt"
+
+  if ! _zshguy_backward_kill_word; then
+    print -ru2 -- "FAIL: backward kill word invocation failed"
+    return 1
+  fi
+
+  assert_eq "[zshguy] " "$BUFFER" "backward kill word restores prefix" || return 1
+  assert_eq "9" "$CURSOR" "backward kill word restores prefix cursor" || return 1
+
+  BUFFER="[zshguy] abc"
+  CURSOR=12
+
+  if ! _zshguy_kill_whole_line; then
+    print -ru2 -- "FAIL: kill whole line invocation failed"
+    return 1
+  fi
+
+  assert_eq "[zshguy] " "$BUFFER" "kill whole line restores prefix" || return 1
+  assert_eq "9" "$CURSOR" "kill whole line restores prefix cursor" || return 1
+}
+
+test_delete_guard_falls_through_outside_prompt_mode() {
+  local BUFFER="plain text"
+  local -i CURSOR=10
+  local zle_widget_called=""
+
+  if ! assert_helper_available _zshguy_backward_delete_char "backward delete char"; then
+    return 1
+  fi
+
+  zle() {
+    zle_widget_called=$1
+  }
+
+  typeset -g _zshguy_state=""
+
+  if ! _zshguy_backward_delete_char; then
+    print -ru2 -- "FAIL: backward delete fallthrough invocation failed"
+    return 1
+  fi
+
+  assert_eq ".backward-delete-char" "$zle_widget_called" "backward delete fallthrough widget" || return 1
+}
+
 test_widget_registers_in_interactive_shell() {
   local registration_state
 
@@ -762,6 +882,10 @@ main() {
   run_test test_widget_shows_inline_generation_display_and_defers_buffer_mutation_until_success
   run_test test_widget_clears_inline_generation_display_on_lms_failure
   run_test test_widget_cleans_prompt_line_on_tty_read_failure
+  run_test test_delete_guard_blocks_prefix_deletion
+  run_test test_delete_guard_allows_query_deletion
+  run_test test_delete_guard_preserves_prefix_for_line_and_word_kills
+  run_test test_delete_guard_falls_through_outside_prompt_mode
   run_test test_widget_registers_in_interactive_shell
   run_test test_widget_skips_empty_prompt_without_mutation
 

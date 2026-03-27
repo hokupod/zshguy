@@ -175,6 +175,16 @@ _zshguy_prompt_prefix() {
   print -r -- "[zshguy] "
 }
 
+_zshguy_prompt_prefix_length() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local prompt_prefix
+
+  prompt_prefix="$(_zshguy_prompt_prefix)" || return 1
+  print -r -- "${#prompt_prefix}"
+}
+
 _zshguy_clear_state() {
   emulate -L zsh
   setopt local_options no_unset
@@ -257,6 +267,95 @@ _zshguy_redraw_prompt() {
   [[ -o zle ]] || return 0
 
   zle reset-prompt
+}
+
+_zshguy_restore_prompt_prefix_boundary() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local prompt_prefix
+  local -i prefix_length
+
+  prompt_prefix="$(_zshguy_prompt_prefix)" || return 1
+  prefix_length="$(_zshguy_prompt_prefix_length)" || return 1
+
+  if [[ ${BUFFER-} != "$prompt_prefix"* ]]; then
+    BUFFER="${prompt_prefix}${BUFFER#$prompt_prefix}"
+  fi
+
+  if (( ${#BUFFER} < prefix_length )); then
+    BUFFER="$prompt_prefix"
+  fi
+
+  if (( CURSOR < prefix_length )); then
+    CURSOR=$prefix_length
+  fi
+}
+
+_zshguy_run_delete_widget() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local widget_name=${1-}
+  local -i prefix_length
+
+  if [[ ${_zshguy_state-} != "collecting_prompt" ]]; then
+    zle ".$widget_name"
+    return 0
+  fi
+
+  prefix_length="$(_zshguy_prompt_prefix_length)" || return 1
+
+  if (( CURSOR <= prefix_length )); then
+    BUFFER="$(_zshguy_prompt_prefix)" || return 1
+    CURSOR=$prefix_length
+    return 0
+  fi
+
+  zle ".$widget_name" || return 1
+  _zshguy_restore_prompt_prefix_boundary || return 1
+}
+
+_zshguy_backward_delete_char() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  _zshguy_run_delete_widget backward-delete-char
+}
+
+_zshguy_vi_backward_delete_char() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  _zshguy_run_delete_widget vi-backward-delete-char
+}
+
+_zshguy_backward_kill_word() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  _zshguy_run_delete_widget backward-kill-word
+}
+
+_zshguy_vi_backward_kill_word() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  _zshguy_run_delete_widget vi-backward-kill-word
+}
+
+_zshguy_backward_kill_line() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  _zshguy_run_delete_widget backward-kill-line
+}
+
+_zshguy_kill_whole_line() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  _zshguy_run_delete_widget kill-whole-line
 }
 
 _zshguy_accept_line() {
@@ -343,6 +442,18 @@ if [[ -o interactive ]]; then
   zle -N zshguy-widget _zshguy_widget
   zle -N zshguy-accept-line _zshguy_accept_line
   zle -N zshguy-send-break _zshguy_send_break
+  zle -N zshguy-backward-delete-char _zshguy_backward_delete_char
+  zle -N zshguy-vi-backward-delete-char _zshguy_vi_backward_delete_char
+  zle -N zshguy-backward-kill-word _zshguy_backward_kill_word
+  zle -N zshguy-vi-backward-kill-word _zshguy_vi_backward_kill_word
+  zle -N zshguy-backward-kill-line _zshguy_backward_kill_line
+  zle -N zshguy-kill-whole-line _zshguy_kill_whole_line
   zle -A zshguy-accept-line accept-line
   zle -A zshguy-send-break send-break
+  zle -A zshguy-backward-delete-char backward-delete-char
+  zle -A zshguy-vi-backward-delete-char vi-backward-delete-char
+  zle -A zshguy-backward-kill-word backward-kill-word
+  zle -A zshguy-vi-backward-kill-word vi-backward-kill-word
+  zle -A zshguy-backward-kill-line backward-kill-line
+  zle -A zshguy-kill-whole-line kill-whole-line
 fi
