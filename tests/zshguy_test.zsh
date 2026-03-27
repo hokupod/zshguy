@@ -404,41 +404,24 @@ test_widget_skips_empty_prompt_without_mutation() {
   local -i CURSOR=4
   local -i expected_cursor=$CURSOR
   local expected_buffer=$BUFFER
-  local run_lms_capture_file
 
   if ! assert_helper_available _zshguy_widget "widget"; then
     return 1
   fi
 
-  _zshguy_build_command_generation_system_prompt() {
-    print -r -- "command-generation-system"
-  }
-  _zshguy_build_insert_system_prompt() {
-    print -r -- "insert-system"
-  }
-  _zshguy_read_tty_prompt() {
-    print -r -- ""
-  }
-  _zshguy_notify_tty() {
-    return 0
-  }
-
-  run_lms_capture_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-widget-run-lms.XXXXXX")" || return 1
-  _zshguy_run_lms() {
-    print -r -- "called" >"$run_lms_capture_file"
-    return 1
-  }
-
   if ! _zshguy_widget; then
     print -ru2 -- "FAIL: widget invocation failed for empty prompt skip path"
-    rm -f "$run_lms_capture_file"
     return 1
   fi
 
-  assert_eq "$expected_buffer" "$BUFFER" "widget buffer for empty prompt skip path" || return 1
-  assert_eq "$expected_cursor" "$CURSOR" "widget cursor for empty prompt skip path" || return 1
-  assert_eq "" "$(<"$run_lms_capture_file")" "widget should not call run lms for empty prompt" || return 1
-  rm -f "$run_lms_capture_file"
+  assert_eq "[zshguy] " "$BUFFER" "widget buffer for prompt mode" || return 1
+  assert_eq "9" "$CURSOR" "widget cursor for prompt mode" || return 1
+  if ! _zshguy_cancel; then
+    print -ru2 -- "FAIL: cancel helper invocation failed for prompt mode"
+    return 1
+  fi
+  assert_eq "$expected_buffer" "$BUFFER" "widget buffer restored after cancel" || return 1
+  assert_eq "$expected_cursor" "$CURSOR" "widget cursor restored after cancel" || return 1
 }
 
 test_widget_uses_command_generation_flow_for_empty_buffer() {
@@ -460,16 +443,12 @@ test_widget_uses_command_generation_flow_for_empty_buffer() {
   _zshguy_build_insert_system_prompt() {
     print -r -- "insert-system"
   }
-  _zshguy_read_tty_prompt() {
-    printf '%s' "$1" >"$tty_prompt_capture_file"
-    print -r -- "describe the command"
-  }
-  _zshguy_notify_tty() {
-    return 0
-  }
   _zshguy_run_lms() {
     printf '%s\0' "$@" >"$lms_capture_file"
     print -r -- "git status"
+  }
+  _zshguy_redraw_prompt() {
+    printf '%s\0' "$BUFFER" >>"$tty_prompt_capture_file"
   }
 
   lms_capture_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-widget.XXXXXX")" || return 1
@@ -482,15 +461,34 @@ test_widget_uses_command_generation_flow_for_empty_buffer() {
     return 1
   fi
 
+  BUFFER="[zshguy] describe the command"
+  CURSOR=${#BUFFER}
+
+  if ! _zshguy_accept_line; then
+    print -ru2 -- "FAIL: accept-line helper invocation failed for empty buffer"
+    rm -f "$lms_capture_file"
+    rm -f "$tty_prompt_capture_file"
+    return 1
+  fi
+
   while IFS= read -r -d '' lms_arg; do
     lms_argv+=("$lms_arg")
   done <"$lms_capture_file"
   rm -f "$lms_capture_file"
-  tty_prompt_value="$(<"$tty_prompt_capture_file")"
+  tty_prompt_value="$(tr '\0' '\n' <"$tty_prompt_capture_file")"
   rm -f "$tty_prompt_capture_file"
   expected_lms_argv=("command-generation-system" "describe the command")
   assert_array_eq "widget argv for empty buffer" expected_lms_argv lms_argv || return 1
-  assert_eq "[zshguy] " "$tty_prompt_value" "widget tty prompt for empty buffer" || return 1
+  if [[ "$tty_prompt_value" != *"[zshguy] "* ]]; then
+    print -ru2 -- "FAIL: widget prompt mode redraw for empty buffer"
+    print -ru2 -- "  actual:   $tty_prompt_value"
+    return 1
+  fi
+  if [[ "$tty_prompt_value" != *"[zshguy] describe the command generating..."* ]]; then
+    print -ru2 -- "FAIL: widget generating redraw for empty buffer"
+    print -ru2 -- "  actual:   $tty_prompt_value"
+    return 1
+  fi
   assert_eq "git status" "$BUFFER" "widget buffer for empty buffer" || return 1
   assert_eq "10" "$CURSOR" "widget cursor for empty buffer" || return 1
 }
@@ -501,8 +499,6 @@ test_widget_uses_insert_flow_for_existing_input() {
   local lms_capture_file
   local -a lms_argv
   local -a expected_lms_argv
-  local tty_prompt_capture_file
-  local tty_prompt_value
 
   if ! assert_helper_available _zshguy_widget "widget"; then
     return 1
@@ -514,11 +510,7 @@ test_widget_uses_insert_flow_for_existing_input() {
   _zshguy_build_insert_system_prompt() {
     print -r -- "insert-system"
   }
-  _zshguy_read_tty_prompt() {
-    printf '%s' "$1" >"$tty_prompt_capture_file"
-    print -r -- "checkout"
-  }
-  _zshguy_notify_tty() {
+  _zshguy_redraw_prompt() {
     return 0
   }
   _zshguy_run_lms() {
@@ -527,12 +519,19 @@ test_widget_uses_insert_flow_for_existing_input() {
   }
 
   lms_capture_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-widget.XXXXXX")" || return 1
-  tty_prompt_capture_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-tty-prompt.XXXXXX")" || return 1
 
   if ! _zshguy_widget; then
     print -ru2 -- "FAIL: widget invocation failed for existing input"
     rm -f "$lms_capture_file"
-    rm -f "$tty_prompt_capture_file"
+    return 1
+  fi
+
+  BUFFER="[zshguy] checkout"
+  CURSOR=${#BUFFER}
+
+  if ! _zshguy_accept_line; then
+    print -ru2 -- "FAIL: accept-line helper invocation failed for existing input"
+    rm -f "$lms_capture_file"
     return 1
   fi
 
@@ -540,20 +539,86 @@ test_widget_uses_insert_flow_for_existing_input() {
     lms_argv+=("$lms_arg")
   done <"$lms_capture_file"
   rm -f "$lms_capture_file"
-  tty_prompt_value="$(<"$tty_prompt_capture_file")"
-  rm -f "$tty_prompt_capture_file"
   expected_lms_argv=("insert-system" "checkout")
   assert_array_eq "widget argv for existing input" expected_lms_argv lms_argv || return 1
-  assert_eq "[zshguy] " "$tty_prompt_value" "widget tty prompt for existing input" || return 1
   assert_eq "git  checkoutstatus" "$BUFFER" "widget buffer for existing input" || return 1
   assert_eq "13" "$CURSOR" "widget cursor for existing input" || return 1
 }
 
-test_widget_clears_generation_line_on_lms_failure() {
+test_widget_shows_inline_generation_display_and_defers_buffer_mutation_until_success() {
   local BUFFER="git status"
   local -i CURSOR=4
-  local -a notify_calls
-  local notify_capture_file
+  local -a redraw_calls
+  local redraw_capture_file
+  local lms_capture_file
+  local expected_buffer="git  checkoutstatus"
+
+  if ! assert_helper_available _zshguy_widget "widget"; then
+    return 1
+  fi
+
+  _zshguy_build_command_generation_system_prompt() {
+    print -r -- "command-generation-system"
+  }
+  _zshguy_build_insert_system_prompt() {
+    print -r -- "insert-system"
+  }
+  _zshguy_redraw_prompt() {
+    printf '%s\0' "$BUFFER" >>"$redraw_capture_file"
+  }
+  _zshguy_run_lms() {
+    if [[ "$BUFFER" != "[zshguy] describe the command generating..." ]]; then
+      print -ru2 -- "FAIL: buffer mutated before generation completed"
+      print -ru2 -- "  actual:   $BUFFER"
+      return 1
+    fi
+    printf '%s\0' "$@" >>"$lms_capture_file"
+    print -r -- " checkout"
+  }
+
+  redraw_capture_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-widget-redraw.XXXXXX")" || return 1
+  lms_capture_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-widget-lms.XXXXXX")" || return 1
+
+  if ! _zshguy_widget; then
+    print -ru2 -- "FAIL: widget invocation failed for inline generation display path"
+    rm -f "$redraw_capture_file"
+    rm -f "$lms_capture_file"
+    return 1
+  fi
+
+  BUFFER="[zshguy] describe the command"
+  CURSOR=${#BUFFER}
+
+  if ! _zshguy_accept_line; then
+    print -ru2 -- "FAIL: accept-line helper invocation failed for inline generation display path"
+    rm -f "$redraw_capture_file"
+    rm -f "$lms_capture_file"
+    return 1
+  fi
+
+  while IFS= read -r -d '' redraw_call; do
+    redraw_calls+=("$redraw_call")
+  done <"$redraw_capture_file"
+  rm -f "$redraw_capture_file"
+  assert_eq 3 "${#redraw_calls[@]}" "widget redraw call count on success" || return 1
+  assert_eq "[zshguy] " "$redraw_calls[1]" "widget prompt mode redraw on success" || return 1
+  assert_eq "[zshguy] describe the command generating..." "$redraw_calls[2]" "widget generating redraw payload on success" || return 1
+  assert_eq "git  checkoutstatus" "$redraw_calls[3]" "widget final redraw payload on success" || return 1
+  if [[ ! -s "$lms_capture_file" ]]; then
+    print -ru2 -- "FAIL: widget should call run lms on success path"
+    rm -f "$lms_capture_file"
+    return 1
+  fi
+  rm -f "$lms_capture_file"
+  assert_eq "$expected_buffer" "$BUFFER" "widget buffer after inline generation display success" || return 1
+  assert_eq "13" "$CURSOR" "widget cursor after inline generation display success" || return 1
+}
+
+test_widget_clears_inline_generation_display_on_lms_failure() {
+  local BUFFER="git status"
+  local -i CURSOR=4
+  local redraw_capture_file
+  local -a redraw_calls
   local lms_capture_file
 
   if ! assert_helper_available _zshguy_widget "widget"; then
@@ -566,34 +631,42 @@ test_widget_clears_generation_line_on_lms_failure() {
   _zshguy_build_insert_system_prompt() {
     print -r -- "insert-system"
   }
-  _zshguy_read_tty_prompt() {
-    print -r -- "describe the command"
-  }
-  _zshguy_notify_tty() {
-    printf '%s\0' "$1" >>"$notify_capture_file"
+  _zshguy_redraw_prompt() {
+    printf '%s\0' "$BUFFER" >>"$redraw_capture_file"
   }
   _zshguy_run_lms() {
     printf '%s\0' "$@" >>"$lms_capture_file"
     return 1
   }
 
-  notify_capture_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-widget-notify.XXXXXX")" || return 1
+  redraw_capture_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-widget-redraw.XXXXXX")" || return 1
   lms_capture_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-widget-lms.XXXXXX")" || return 1
 
   if ! _zshguy_widget; then
     print -ru2 -- "FAIL: widget invocation failed for lms failure cleanup path"
-    rm -f "$notify_capture_file"
+    rm -f "$redraw_capture_file"
     rm -f "$lms_capture_file"
     return 1
   fi
 
-  while IFS= read -r -d '' notify_call; do
-    notify_calls+=("$notify_call")
-  done <"$notify_capture_file"
-  rm -f "$notify_capture_file"
-  assert_eq 2 "${#notify_calls[@]}" "widget notify call count on lms failure" || return 1
-  assert_eq "[zshguy] describe the command generating..." "$notify_calls[1]" "widget notify generation message on lms failure" || return 1
-  assert_eq $'\r\e[K' "$notify_calls[2]" "widget notify cleanup on lms failure" || return 1
+  BUFFER="[zshguy] describe the command"
+  CURSOR=${#BUFFER}
+
+  if ! _zshguy_accept_line; then
+    print -ru2 -- "FAIL: accept-line helper invocation failed for lms failure cleanup path"
+    rm -f "$redraw_capture_file"
+    rm -f "$lms_capture_file"
+    return 1
+  fi
+
+  while IFS= read -r -d '' redraw_call; do
+    redraw_calls+=("$redraw_call")
+  done <"$redraw_capture_file"
+  rm -f "$redraw_capture_file"
+  assert_eq 3 "${#redraw_calls[@]}" "widget redraw call count on lms failure" || return 1
+  assert_eq "[zshguy] " "$redraw_calls[1]" "widget prompt mode redraw on lms failure" || return 1
+  assert_eq "[zshguy] describe the command generating..." "$redraw_calls[2]" "widget generating redraw payload on lms failure" || return 1
+  assert_eq "git status" "$redraw_calls[3]" "widget restored redraw payload on lms failure" || return 1
   if [[ ! -s "$lms_capture_file" ]]; then
     print -ru2 -- "FAIL: widget should call run lms on failure path"
     rm -f "$lms_capture_file"
@@ -609,8 +682,6 @@ test_widget_cleans_prompt_line_on_tty_read_failure() {
   local -i CURSOR=4
   local -i expected_cursor=$CURSOR
   local expected_buffer=$BUFFER
-  local -a notify_calls
-  local notify_capture_file
 
   if ! assert_helper_available _zshguy_widget "widget"; then
     return 1
@@ -622,33 +693,149 @@ test_widget_cleans_prompt_line_on_tty_read_failure() {
   _zshguy_build_insert_system_prompt() {
     print -r -- "insert-system"
   }
-  _zshguy_read_tty_prompt() {
-    return 1
-  }
-  _zshguy_notify_tty() {
-    printf '%s\0' "$1" >>"$notify_capture_file"
-  }
   _zshguy_run_lms() {
     print -ru2 -- "FAIL: run lms should not be called when tty prompt read fails"
     return 1
   }
-
-  notify_capture_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-widget-notify.XXXXXX")" || return 1
+  _zshguy_redraw_prompt() {
+    return 0
+  }
 
   if ! _zshguy_widget; then
     print -ru2 -- "FAIL: widget invocation failed for tty read failure cleanup path"
-    rm -f "$notify_capture_file"
     return 1
   fi
 
-  while IFS= read -r -d '' notify_call; do
-    notify_calls+=("$notify_call")
-  done <"$notify_capture_file"
-  rm -f "$notify_capture_file"
-  assert_eq 1 "${#notify_calls[@]}" "widget notify call count on tty read failure" || return 1
-  assert_eq $'\r\e[K' "$notify_calls[1]" "widget notify cleanup on tty read failure" || return 1
-  assert_eq "$expected_buffer" "$BUFFER" "widget buffer after tty read failure" || return 1
-  assert_eq "$expected_cursor" "$CURSOR" "widget cursor after tty read failure" || return 1
+  assert_eq "[zshguy] " "$BUFFER" "widget buffer after entering prompt mode" || return 1
+  assert_eq "9" "$CURSOR" "widget cursor after entering prompt mode" || return 1
+
+  if ! _zshguy_cancel; then
+    print -ru2 -- "FAIL: cancel helper invocation failed for tty read failure cleanup path"
+    return 1
+  fi
+
+  assert_eq "$expected_buffer" "$BUFFER" "widget buffer restored after cancel path" || return 1
+  assert_eq "$expected_cursor" "$CURSOR" "widget cursor restored after cancel path" || return 1
+}
+
+test_delete_guard_blocks_prefix_deletion() {
+  local BUFFER="[zshguy] "
+  local -i CURSOR=9
+
+  if ! assert_helper_available _zshguy_backward_delete_char "backward delete char"; then
+    return 1
+  fi
+
+  zle() {
+    print -ru2 -- "FAIL: builtin backward delete should not run at prefix boundary"
+    return 1
+  }
+
+  typeset -g _zshguy_state="collecting_prompt"
+
+  if ! _zshguy_backward_delete_char; then
+    print -ru2 -- "FAIL: backward delete guard invocation failed"
+    return 1
+  fi
+
+  assert_eq "[zshguy] " "$BUFFER" "backward delete guard preserves prefix buffer" || return 1
+  assert_eq "9" "$CURSOR" "backward delete guard preserves prefix cursor" || return 1
+}
+
+test_delete_guard_allows_query_deletion() {
+  local BUFFER="[zshguy] abc"
+  local -i CURSOR=12
+
+  if ! assert_helper_available _zshguy_backward_delete_char "backward delete char"; then
+    return 1
+  fi
+
+  zle() {
+    if [[ "$1" != ".backward-delete-char" ]]; then
+      print -ru2 -- "FAIL: unexpected zle widget"
+      print -ru2 -- "  actual:   $1"
+      return 1
+    fi
+    BUFFER="${BUFFER:0:$(( CURSOR - 1 ))}${BUFFER:$CURSOR}"
+    CURSOR=$(( CURSOR - 1 ))
+  }
+
+  typeset -g _zshguy_state="collecting_prompt"
+
+  if ! _zshguy_backward_delete_char; then
+    print -ru2 -- "FAIL: backward delete invocation failed for query content"
+    return 1
+  fi
+
+  assert_eq "[zshguy] ab" "$BUFFER" "backward delete removes query character" || return 1
+  assert_eq "11" "$CURSOR" "backward delete updates cursor in query" || return 1
+}
+
+test_delete_guard_preserves_prefix_for_line_and_word_kills() {
+  local BUFFER="[zshguy] abc"
+  local -i CURSOR=12
+
+  if ! assert_helper_available _zshguy_backward_kill_word "backward kill word"; then
+    return 1
+  fi
+
+  zle() {
+    case "$1" in
+      .backward-kill-word|.kill-whole-line)
+        BUFFER=""
+        CURSOR=0
+        ;;
+      *)
+        print -ru2 -- "FAIL: unexpected zle widget"
+        print -ru2 -- "  actual:   $1"
+        return 1
+        ;;
+    esac
+  }
+
+  typeset -g _zshguy_state="collecting_prompt"
+
+  if ! _zshguy_backward_kill_word; then
+    print -ru2 -- "FAIL: backward kill word invocation failed"
+    return 1
+  fi
+
+  assert_eq "[zshguy] " "$BUFFER" "backward kill word restores prefix" || return 1
+  assert_eq "9" "$CURSOR" "backward kill word restores prefix cursor" || return 1
+
+  BUFFER="[zshguy] abc"
+  CURSOR=12
+
+  if ! _zshguy_kill_whole_line; then
+    print -ru2 -- "FAIL: kill whole line invocation failed"
+    return 1
+  fi
+
+  assert_eq "[zshguy] " "$BUFFER" "kill whole line restores prefix" || return 1
+  assert_eq "9" "$CURSOR" "kill whole line restores prefix cursor" || return 1
+}
+
+test_delete_guard_falls_through_outside_prompt_mode() {
+  local BUFFER="plain text"
+  local -i CURSOR=10
+  local zle_widget_called=""
+
+  if ! assert_helper_available _zshguy_backward_delete_char "backward delete char"; then
+    return 1
+  fi
+
+  zle() {
+    zle_widget_called=$1
+  }
+
+  typeset -g _zshguy_state=""
+
+  if ! _zshguy_backward_delete_char; then
+    print -ru2 -- "FAIL: backward delete fallthrough invocation failed"
+    return 1
+  fi
+
+  assert_eq ".backward-delete-char" "$zle_widget_called" "backward delete fallthrough widget" || return 1
 }
 
 test_widget_registers_in_interactive_shell() {
@@ -692,8 +879,13 @@ main() {
   run_test test_run_lms_failure_suppresses_stderr
   run_test test_widget_uses_command_generation_flow_for_empty_buffer
   run_test test_widget_uses_insert_flow_for_existing_input
-  run_test test_widget_clears_generation_line_on_lms_failure
+  run_test test_widget_shows_inline_generation_display_and_defers_buffer_mutation_until_success
+  run_test test_widget_clears_inline_generation_display_on_lms_failure
   run_test test_widget_cleans_prompt_line_on_tty_read_failure
+  run_test test_delete_guard_blocks_prefix_deletion
+  run_test test_delete_guard_allows_query_deletion
+  run_test test_delete_guard_preserves_prefix_for_line_and_word_kills
+  run_test test_delete_guard_falls_through_outside_prompt_mode
   run_test test_widget_registers_in_interactive_shell
   run_test test_widget_skips_empty_prompt_without_mutation
 
