@@ -12,13 +12,39 @@ Type what you want to do in plain English, and `zshguy` asks the model for a zsh
 
 ### Preflight
 
-Run `lms` once before using the widget and confirm it can reach your model:
+Run these steps before using the widget:
 
 ```zsh
+# Check LMS CLI availability
+lms --help
+
+# Confirm LM Studio is running and the model is reachable
 lms chat -p "ping"
 ```
 
 If you set `ZSHGUY_MODEL`, run `lms chat "$ZSHGUY_MODEL" -p "ping"` instead.
+
+### Model setup (example: `qwen/qwen3.5-9b`)
+
+`qwen/qwen3.5-9b` is an example model name. Replace it with the model key you want to use.
+
+When preparing a new environment, run once:
+
+```zsh
+# Download model
+lms get qwen/qwen3.5-9b
+
+# Confirm local model key
+lms ls
+
+# Load model to memory
+lms load qwen/qwen3.5-9b
+
+# Verify generation
+lms chat qwen/qwen3.5-9b -p "ping"
+```
+
+If you omit the model/key argument for `lms get` or `lms load`, LM Studio opens an interactive selector.
 
 ## Installation
 
@@ -87,6 +113,7 @@ export ZSHGUY_MODEL=llama-3.1-8b-instruct
 ```
 
 If `ZSHGUY_MODEL` is unset, `lms chat` uses its default model.
+
 
 ## License
 
