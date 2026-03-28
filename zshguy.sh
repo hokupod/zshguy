@@ -42,7 +42,7 @@ _zshguy_run_lms() {
   lms_args="$(_zshguy_build_lms_args "$system_prompt" "$user_prompt")" || return 1
   lms_argv=("${(@Q)${(z)lms_args}}")
 
-  if ! lms_output="$(lms "${lms_argv[@]}" 2>/dev/null)"; then
+  if ! lms_output="$(lms "${lms_argv[@]}")"; then
     return 1
   fi
 
@@ -397,7 +397,7 @@ _zshguy_accept_line() {
     _zshguy_clear_state
     _zshguy_redraw_prompt
     _zshguy_handle_generation_error
-    return 0
+    return 1
   fi
 
   _zshguy_restore_saved_buffer
