@@ -319,6 +319,8 @@ _zshguy_run_delete_widget() {
   emulate -L zsh
   setopt local_options no_unset
 
+  [[ -o zle ]] && zle -M ""
+
   local widget_name=${1-}
   local -i prefix_length
 
@@ -385,6 +387,8 @@ _zshguy_accept_line() {
   emulate -L zsh
   setopt local_options no_unset
 
+  [[ -o zle ]] && zle -M ""
+
   local user_prompt
   local system_prompt
   local lms_output
@@ -440,6 +444,8 @@ _zshguy_send_break() {
   emulate -L zsh
   setopt local_options no_unset
 
+  [[ -o zle ]] && zle -M ""
+
   if [[ -n ${_zshguy_state-} ]]; then
     _zshguy_cancel
     return 0
@@ -451,6 +457,8 @@ _zshguy_send_break() {
 _zshguy_widget() {
   emulate -L zsh
   setopt local_options no_unset
+
+  [[ -o zle ]] && zle -M ""
 
   [[ -z ${_zshguy_state-} ]] || return 0
 
