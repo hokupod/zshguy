@@ -38,13 +38,24 @@ _zshguy_run_lms() {
   local lms_args
   local -a lms_argv
   local lms_output
+  local lms_stderr_file
+  local lms_stderr
 
   lms_args="$(_zshguy_build_lms_args "$system_prompt" "$user_prompt")" || return 1
   lms_argv=("${(@Q)${(z)lms_args}}")
 
-  if ! lms_output="$(lms "${lms_argv[@]}" 2>/dev/null)"; then
+  lms_stderr_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-lms-stderr.XXXXXX")" || return 1
+
+  if ! lms_output="$(lms "${lms_argv[@]}" 2>"$lms_stderr_file")"; then
+    lms_stderr="$(<"$lms_stderr_file")"
+    command rm -f "$lms_stderr_file"
+    lms_stderr="${lms_stderr%%$'\n'*}"
+    lms_stderr="${lms_stderr%$'\r'}"
+    print -r -- "$lms_stderr"
     return 1
   fi
+
+  command rm -f "$lms_stderr_file"
 
   lms_output="$(_zshguy_normalize_model_output "$lms_output")" || return 1
   _zshguy_validate_model_output "$lms_output" || return 1
@@ -134,6 +145,18 @@ _zshguy_apply_insert() {
 _zshguy_handle_generation_error() {
   emulate -L zsh
   setopt local_options no_unset
+
+  local error_message=${1-}
+
+  [[ -o zle ]] || return 0
+
+  if [[ -n "$error_message" ]]; then
+    zle -M "[zshguy] lms failed: $error_message
+Continue typing to dismiss."
+  else
+    zle -M "[zshguy] lms failed: unknown error
+Continue typing to dismiss."
+  fi
 
   return 0
 }
@@ -296,6 +319,8 @@ _zshguy_run_delete_widget() {
   emulate -L zsh
   setopt local_options no_unset
 
+  [[ -o zle ]] && zle -M ""
+
   local widget_name=${1-}
   local -i prefix_length
 
@@ -362,6 +387,8 @@ _zshguy_accept_line() {
   emulate -L zsh
   setopt local_options no_unset
 
+  [[ -o zle ]] && zle -M ""
+
   local user_prompt
   local system_prompt
   local lms_output
@@ -396,8 +423,8 @@ _zshguy_accept_line() {
     _zshguy_restore_saved_buffer
     _zshguy_clear_state
     _zshguy_redraw_prompt
-    _zshguy_handle_generation_error
-    return 0
+    _zshguy_handle_generation_error "$lms_output"
+    return 1
   fi
 
   _zshguy_restore_saved_buffer
@@ -417,6 +444,8 @@ _zshguy_send_break() {
   emulate -L zsh
   setopt local_options no_unset
 
+  [[ -o zle ]] && zle -M ""
+
   if [[ -n ${_zshguy_state-} ]]; then
     _zshguy_cancel
     return 0
@@ -428,6 +457,8 @@ _zshguy_send_break() {
 _zshguy_widget() {
   emulate -L zsh
   setopt local_options no_unset
+
+  [[ -o zle ]] && zle -M ""
 
   [[ -z ${_zshguy_state-} ]] || return 0
 

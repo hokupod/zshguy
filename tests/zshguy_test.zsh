@@ -367,11 +367,10 @@ test_handle_generation_error_preserves_buffer_and_cursor() {
   assert_eq "4" "$CURSOR" "cursor after generation error" || return 1
 }
 
-test_run_lms_failure_suppresses_stderr() {
+test_run_lms_failure_returns_stderr() {
   local lms_status_file
   local lms_status=0
   local lms_output
-  local lms_stderr
   local ZSHGUY_MODEL="test-model"
 
   if ! assert_helper_available _zshguy_run_lms "run lms"; then
@@ -384,19 +383,18 @@ test_run_lms_failure_suppresses_stderr() {
   }
 
   lms_status_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-lms-status.XXXXXX")" || return 1
-  lms_stderr="$({
-    if lms_output="$(_zshguy_run_lms "sys" "user")"; then
+  lms_output="$({
+    if _zshguy_run_lms "sys" "user"; then
       print -r -- 0 >"$lms_status_file"
     else
       print -r -- $? >"$lms_status_file"
     fi
-  } 2>&1)"
+  })"
   lms_status="$(<"$lms_status_file")"
   rm -f "$lms_status_file"
 
   assert_eq "1" "$lms_status" "run lms failure status" || return 1
-  assert_eq "" "$lms_output" "run lms failure output" || return 1
-  assert_eq "" "$lms_stderr" "run lms stderr suppression" || return 1
+  assert_eq "boom" "$lms_output" "run lms failure returns stderr" || return 1
 }
 
 test_widget_skips_empty_prompt_without_mutation() {
@@ -652,8 +650,8 @@ test_widget_clears_inline_generation_display_on_lms_failure() {
   BUFFER="[zshguy] describe the command"
   CURSOR=${#BUFFER}
 
-  if ! _zshguy_accept_line; then
-    print -ru2 -- "FAIL: accept-line helper invocation failed for lms failure cleanup path"
+  if _zshguy_accept_line; then
+    print -ru2 -- "FAIL: accept-line helper invocation should have failed for lms failure cleanup path"
     rm -f "$redraw_capture_file"
     rm -f "$lms_capture_file"
     return 1
@@ -876,7 +874,7 @@ main() {
   run_test test_mode_for_buffer
   run_test test_apply_insert
   run_test test_handle_generation_error_preserves_buffer_and_cursor
-  run_test test_run_lms_failure_suppresses_stderr
+  run_test test_run_lms_failure_returns_stderr
   run_test test_widget_uses_command_generation_flow_for_empty_buffer
   run_test test_widget_uses_insert_flow_for_existing_input
   run_test test_widget_shows_inline_generation_display_and_defers_buffer_mutation_until_success
