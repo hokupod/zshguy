@@ -48,12 +48,14 @@ _zshguy_run_lms() {
 
   if ! lms_output="$(lms "${lms_argv[@]}" 2>"$lms_stderr_file")"; then
     lms_stderr="$(<"$lms_stderr_file")"
-    rm -f "$lms_stderr_file"
+    command rm -f "$lms_stderr_file"
+    lms_stderr="${lms_stderr%%$'\n'*}"
+    lms_stderr="${lms_stderr%$'\r'}"
     print -r -- "$lms_stderr"
     return 1
   fi
 
-  rm -f "$lms_stderr_file"
+  command rm -f "$lms_stderr_file"
 
   lms_output="$(_zshguy_normalize_model_output "$lms_output")" || return 1
   _zshguy_validate_model_output "$lms_output" || return 1
@@ -149,9 +151,11 @@ _zshguy_handle_generation_error() {
   [[ -o zle ]] || return 0
 
   if [[ -n "$error_message" ]]; then
-    zle -M "[zshguy] lms error: $error_message"
+    zle -M "[zshguy] lms failed: $error_message
+Continue typing to dismiss."
   else
-    zle -M "[zshguy] lms error: unknown error"
+    zle -M "[zshguy] lms failed: unknown error
+Continue typing to dismiss."
   fi
 
   return 0
