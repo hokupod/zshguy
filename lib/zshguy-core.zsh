@@ -236,11 +236,11 @@ _zshguy_extract_prompt_query() {
   prompt_prefix="$(_zshguy_prompt_prefix)" || return 1
 
   if [[ ${BUFFER-} == "$prompt_prefix"* ]]; then
-    print -r -- "${BUFFER#$prompt_prefix}"
+    print -r -- "${BUFFER#"$prompt_prefix"}"
     return 0
   fi
 
-  print -r -- "${BUFFER-}"
+  return 1
 }
 
 _zshguy_show_generating_buffer() {
@@ -287,7 +287,7 @@ _zshguy_restore_prompt_prefix_boundary() {
   prefix_length="$(_zshguy_prompt_prefix_length)" || return 1
 
   if [[ ${BUFFER-} != "$prompt_prefix"* ]]; then
-    BUFFER="${prompt_prefix}${BUFFER#$prompt_prefix}"
+    BUFFER="${prompt_prefix}${BUFFER#"$prompt_prefix"}"
   fi
 
   if (( ${#BUFFER} < prefix_length )); then
@@ -297,6 +297,52 @@ _zshguy_restore_prompt_prefix_boundary() {
   if (( CURSOR < prefix_length )); then
     CURSOR=$prefix_length
   fi
+}
+
+_zshguy_original_widget_name() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  case "${1-}" in
+    accept-line)
+      print -r -- "${_zshguy_orig_accept_line_widget:-.accept-line}"
+      ;;
+    send-break)
+      print -r -- "${_zshguy_orig_send_break_widget:-.send-break}"
+      ;;
+    backward-delete-char)
+      print -r -- "${_zshguy_orig_backward_delete_char_widget:-.backward-delete-char}"
+      ;;
+    vi-backward-delete-char)
+      print -r -- "${_zshguy_orig_vi_backward_delete_char_widget:-.vi-backward-delete-char}"
+      ;;
+    backward-kill-word)
+      print -r -- "${_zshguy_orig_backward_kill_word_widget:-.backward-kill-word}"
+      ;;
+    vi-backward-kill-word)
+      print -r -- "${_zshguy_orig_vi_backward_kill_word_widget:-.vi-backward-kill-word}"
+      ;;
+    backward-kill-line)
+      print -r -- "${_zshguy_orig_backward_kill_line_widget:-.backward-kill-line}"
+      ;;
+    kill-whole-line)
+      print -r -- "${_zshguy_orig_kill_whole_line_widget:-.kill-whole-line}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+_zshguy_call_original_widget() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local widget_name=${1-}
+  local original_widget
+
+  original_widget="$(_zshguy_original_widget_name "$widget_name")" || return 1
+  zle "$original_widget"
 }
 
 _zshguy_run_delete_widget() {
@@ -309,7 +355,7 @@ _zshguy_run_delete_widget() {
   local -i prefix_length
 
   if [[ ${_zshguy_state-} != "collecting_prompt" ]]; then
-    zle ".$widget_name"
+    _zshguy_call_original_widget "$widget_name" || return 1
     return 0
   fi
 
@@ -321,7 +367,7 @@ _zshguy_run_delete_widget() {
     return 0
   fi
 
-  zle ".$widget_name" || return 1
+  _zshguy_call_original_widget "$widget_name" || return 1
   _zshguy_restore_prompt_prefix_boundary || return 1
 }
 
@@ -378,7 +424,7 @@ _zshguy_accept_line() {
   local lms_output
 
   if [[ ${_zshguy_state-} != "collecting_prompt" ]]; then
-    zle .accept-line
+    _zshguy_call_original_widget accept-line || return 1
     return 0
   fi
 
@@ -435,7 +481,7 @@ _zshguy_send_break() {
     return 0
   fi
 
-  zle .send-break
+  _zshguy_call_original_widget send-break
 }
 
 _zshguy_widget() {

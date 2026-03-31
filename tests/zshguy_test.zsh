@@ -452,6 +452,64 @@ test_mode_for_buffer() {
   assert_eq "empty" "$prompt_mode" "mode selection for empty input" || return 1
 }
 
+test_extract_prompt_query() {
+  local BUFFER="[zshguy] describe the command"
+  local prompt_query
+
+  if ! assert_helper_available _zshguy_extract_prompt_query "extract prompt query"; then
+    return 1
+  fi
+
+  if ! prompt_query="$(_zshguy_extract_prompt_query)"; then
+    print -ru2 -- "FAIL: extract prompt query helper invocation failed"
+    return 1
+  fi
+
+  assert_eq "describe the command" "$prompt_query" "extract prompt query strips literal prefix" || return 1
+}
+
+test_extract_prompt_query_rejects_nonprefixed_buffer() {
+  local BUFFER="z hello"
+  local status_file
+  local helper_output
+  local helper_status=0
+
+  if ! assert_helper_available _zshguy_extract_prompt_query "extract prompt query"; then
+    return 1
+  fi
+
+  status_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-query-status.XXXXXX")" || return 1
+  helper_output="$({
+    if _zshguy_extract_prompt_query; then
+      print -r -- 0 >"$status_file"
+    else
+      print -r -- $? >"$status_file"
+    fi
+  })"
+  helper_status="$(<"$status_file")"
+  rm -f "$status_file"
+
+  assert_eq "1" "$helper_status" "extract prompt query rejects nonprefixed buffer status" || return 1
+  assert_eq "" "$helper_output" "extract prompt query rejects nonprefixed buffer output" || return 1
+}
+
+test_restore_prompt_prefix_boundary_uses_literal_prefix() {
+  local BUFFER="z hello"
+  local -i CURSOR=0
+
+  if ! assert_helper_available _zshguy_restore_prompt_prefix_boundary "restore prompt prefix boundary"; then
+    return 1
+  fi
+
+  if ! _zshguy_restore_prompt_prefix_boundary; then
+    print -ru2 -- "FAIL: restore prompt prefix boundary helper invocation failed"
+    return 1
+  fi
+
+  assert_eq "[zshguy] z hello" "$BUFFER" "restore prompt prefix boundary preserves nonprefixed buffer literally" || return 1
+  assert_eq "9" "$CURSOR" "restore prompt prefix boundary updates cursor to prefix length" || return 1
+}
+
 test_apply_insert() {
   local BUFFER="git status"
   local -i CURSOR=4
@@ -868,7 +926,7 @@ test_delete_guard_allows_query_deletion() {
   fi
 
   zle() {
-    if [[ "$1" != ".backward-delete-char" ]]; then
+    if [[ "$1" != "zshguy-orig-backward-delete-char" ]]; then
       print -ru2 -- "FAIL: unexpected zle widget"
       print -ru2 -- "  actual:   $1"
       return 1
@@ -878,6 +936,7 @@ test_delete_guard_allows_query_deletion() {
   }
 
   typeset -g _zshguy_state="collecting_prompt"
+  typeset -g _zshguy_orig_backward_delete_char_widget="zshguy-orig-backward-delete-char"
 
   if ! _zshguy_backward_delete_char; then
     print -ru2 -- "FAIL: backward delete invocation failed for query content"
@@ -898,7 +957,7 @@ test_delete_guard_preserves_prefix_for_line_and_word_kills() {
 
   zle() {
     case "$1" in
-      .backward-kill-word|.kill-whole-line)
+      zshguy-orig-backward-kill-word|zshguy-orig-kill-whole-line)
         BUFFER=""
         CURSOR=0
         ;;
@@ -911,6 +970,8 @@ test_delete_guard_preserves_prefix_for_line_and_word_kills() {
   }
 
   typeset -g _zshguy_state="collecting_prompt"
+  typeset -g _zshguy_orig_backward_kill_word_widget="zshguy-orig-backward-kill-word"
+  typeset -g _zshguy_orig_kill_whole_line_widget="zshguy-orig-kill-whole-line"
 
   if ! _zshguy_backward_kill_word; then
     print -ru2 -- "FAIL: backward kill word invocation failed"
@@ -946,13 +1007,14 @@ test_delete_guard_falls_through_outside_prompt_mode() {
   }
 
   typeset -g _zshguy_state=""
+  typeset -g _zshguy_orig_backward_delete_char_widget="zshguy-orig-backward-delete-char"
 
   if ! _zshguy_backward_delete_char; then
     print -ru2 -- "FAIL: backward delete fallthrough invocation failed"
     return 1
   fi
 
-  assert_eq ".backward-delete-char" "$zle_widget_called" "backward delete fallthrough widget" || return 1
+  assert_eq "zshguy-orig-backward-delete-char" "$zle_widget_called" "backward delete fallthrough widget" || return 1
 }
 
 test_widget_registers_in_interactive_shell() {
@@ -966,6 +1028,19 @@ test_widget_registers_in_interactive_shell() {
   }
 
   assert_eq "1" "$registration_state" "widget registration in interactive shell" || return 1
+}
+
+test_widget_registration_preserves_original_widgets() {
+  local registration_state
+
+  registration_state="$(
+    zsh -f -ic "zle -N accept-line self-insert; zle -N send-break self-insert; source ${(q)ZSHGUY_PLUGIN_ZSH}; print -r -- \${+widgets[zshguy-orig-accept-line]} \${+widgets[zshguy-orig-send-break]}"
+  )" || {
+    print -ru2 -- "FAIL: original widget preservation check failed"
+    return 1
+  }
+
+  assert_eq "1 1" "$registration_state" "widget registration preserves original widgets" || return 1
 }
 
 run_test() {
@@ -996,6 +1071,9 @@ main() {
   run_test test_run_lms_strips_think_block_and_trailing_tokens
   run_test test_run_lms_rejects_multiline_postamble
   run_test test_mode_for_buffer
+  run_test test_extract_prompt_query
+  run_test test_extract_prompt_query_rejects_nonprefixed_buffer
+  run_test test_restore_prompt_prefix_boundary_uses_literal_prefix
   run_test test_apply_insert
   run_test test_handle_generation_error_preserves_buffer_and_cursor
   run_test test_run_lms_failure_returns_stderr
@@ -1009,6 +1087,7 @@ main() {
   run_test test_delete_guard_preserves_prefix_for_line_and_word_kills
   run_test test_delete_guard_falls_through_outside_prompt_mode
   run_test test_widget_registers_in_interactive_shell
+  run_test test_widget_registration_preserves_original_widgets
   run_test test_widget_skips_empty_prompt_without_mutation
 
   print -r -- ""
