@@ -108,10 +108,6 @@ _zshguy_normalize_model_output() {
     cleaned_lines=("${cleaned_lines[@]:1:${#cleaned_lines[@]}-2}")
   fi
 
-  if (( ${#cleaned_lines[@]} > 1 )); then
-    cleaned_lines=("${cleaned_lines[-1]}")
-  fi
-
   print -r -- "${(F)cleaned_lines}"
 }
 
@@ -164,7 +160,7 @@ _zshguy_build_command_generation_system_prompt() {
   emulate -L zsh
   setopt local_options no_unset
 
-  print -r -- "You are a zsh command generator for an interactive terminal widget. The user describes what they want to do in natural language. Output ONLY a single zsh command that directly and minimally satisfies the request. Do not explain. Do not use markdown. Do not use code fences. Do not include multiple options. Do not add extra transformations, compression, deletion, extraction, or side effects unless the user explicitly asked for them. Prefer common, simple commands that a human would naturally write. If the user asks to list or filter files, prefer straightforward tools such as find, ls, or grep. Interpret ambiguous requests conservatively. If the user asks to list files with a given extension, return a file-listing command for that extension, not an archive or conversion command. Examples: 'list only .sh files' -> 'find . -type f -name '\''*.sh'\''' ; 'extract a tar.gz archive' -> 'tar -xvf archive.tar.gz'. No trailing newline. The command should work on macOS and Linux. Current directory: $(pwd)"
+  print -r -- "You are a zsh command generator for an interactive terminal widget. The user describes what they want to do in natural language. Output ONLY a single zsh command that directly and minimally satisfies the request. Do not explain. Do not use markdown. Do not use code fences. Do not include multiple options. Do not add extra transformations, compression, deletion, extraction, or side effects unless the user explicitly asked for them. Prefer common, simple commands that a human would naturally write. If the user asks to list or filter files, prefer straightforward tools such as find, ls, or grep. Interpret ambiguous requests conservatively. If the user asks to list files with a given extension, return a file-listing command for that extension, not an archive or conversion command. Examples: 'list only .sh files' -> 'find . -type f -name '\''*.sh'\''' ; 'extract a tar.gz archive' -> 'tar -xvf archive.tar.gz'. No trailing newline. The command should work on macOS and Linux. Current directory: $PWD"
 }
 
 _zshguy_build_insert_system_prompt() {
@@ -176,18 +172,7 @@ _zshguy_build_insert_system_prompt() {
 
   print -r -- "You are a zsh command generator for an interactive terminal widget. The user has partially written a command line. The text before the cursor is: $prefix
 The text after the cursor is: $suffix
-Output ONLY the text to insert at the cursor position. Do not explain. Do not use markdown. Do not use code fences. Do not repeat the full command line. Do not change text outside the insertion. Keep the insertion minimal and directly relevant to the user's request. No trailing newline. The inserted text combined with the existing text should form a valid zsh command. Current directory: $(pwd)"
-}
-
-_zshguy_notify_tty() {
-  emulate -L zsh
-  setopt local_options no_unset
-
-  local message=${1-}
-
-  [[ -o interactive ]] || return 0
-
-  print -rn -- "$message" >/dev/tty 2>/dev/null || return 0
+Output ONLY the text to insert at the cursor position. Do not explain. Do not use markdown. Do not use code fences. Do not repeat the full command line. Do not change text outside the insertion. Keep the insertion minimal and directly relevant to the user's request. No trailing newline. The inserted text combined with the existing text should form a valid zsh command. Current directory: $PWD"
 }
 
 _zshguy_prompt_prefix() {

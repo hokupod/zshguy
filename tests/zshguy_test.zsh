@@ -397,6 +397,36 @@ test_run_lms_strips_think_block_and_trailing_tokens() {
   assert_eq "ls" "$lms_output" "run lms strips think block and trailing tokens" || return 1
 }
 
+test_run_lms_rejects_multiline_postamble() {
+  local lms_status_file
+  local lms_status=0
+  local lms_output
+  local ZSHGUY_MODEL="test-model"
+
+  if ! assert_helper_available _zshguy_run_lms "run lms"; then
+    return 1
+  fi
+
+  lms() {
+    print -r -- 'ls -l'
+    print -r -- 'This command lists files'
+  }
+
+  lms_status_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-lms-status.XXXXXX")" || return 1
+  lms_output="$({
+    if _zshguy_run_lms "sys" "user"; then
+      print -r -- 0 >"$lms_status_file"
+    else
+      print -r -- $? >"$lms_status_file"
+    fi
+  })"
+  lms_status="$(<"$lms_status_file")"
+  rm -f "$lms_status_file"
+
+  assert_eq "1" "$lms_status" "run lms multiline postamble status" || return 1
+  assert_eq "" "$lms_output" "run lms rejects multiline postamble output" || return 1
+}
+
 test_mode_for_buffer() {
   local prompt_mode
   local BUFFER="git status"
@@ -964,6 +994,7 @@ main() {
   run_test test_run_lms_preserves_special_characters
   run_test test_run_lms_strips_markdown_fences
   run_test test_run_lms_strips_think_block_and_trailing_tokens
+  run_test test_run_lms_rejects_multiline_postamble
   run_test test_mode_for_buffer
   run_test test_apply_insert
   run_test test_handle_generation_error_preserves_buffer_and_cursor
