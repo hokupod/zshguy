@@ -48,20 +48,38 @@ If you omit the model/key argument for `lms get` or `lms load`, LM Studio opens 
 
 ## Installation
 
-Source the script from your `.zshrc`:
+### sheldon
+
+Add `zshguy` to your `plugins.toml` and let sheldon load the canonical plugin entrypoint:
+
+```toml
+[plugins.zshguy]
+github = "hokupod/zshguy"
+```
+
+### Other plugin managers
+
+Use `zshguy.plugin.zsh` as the canonical plugin entrypoint:
+
+```zsh
+source /path/to/zshguy.plugin.zsh
+```
+
+`zshguy.sh` remains available as a compatibility path for manual sourcing and older setups.
+
+### Manual source
+
+If you do not use a plugin manager, source the compatibility wrapper from your `.zshrc`:
 
 ```zsh
 source /path/to/zshguy.sh
 ```
 
-When sourced in an interactive shell, the script registers `zshguy-widget` with `zle -N`.
-
 ## Key Binding
 
-`zshguy` does not bind a key automatically. Add a manual `bindkey` mapping after sourcing the script:
+`zshguy` does not bind a key automatically. Add a manual `bindkey` mapping:
 
 ```zsh
-source /path/to/zshguy.sh
 bindkey '^X^J' zshguy-widget
 ```
 

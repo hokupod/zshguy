@@ -7,9 +7,16 @@ setopt errexit
 
 typeset -r TEST_DIR="${0:A:h}"
 typeset -r ZSHGUY_SH="${TEST_DIR:h}/zshguy.sh"
+typeset -r ZSHGUY_PLUGIN_ZSH="${TEST_DIR:h}/zshguy.plugin.zsh"
 typeset ZSHGUY_TEST_SETUP_STATE
 
-if [[ -f "$ZSHGUY_SH" ]]; then
+if [[ -f "$ZSHGUY_PLUGIN_ZSH" ]]; then
+  if source "$ZSHGUY_PLUGIN_ZSH"; then
+    ZSHGUY_TEST_SETUP_STATE="loaded $ZSHGUY_PLUGIN_ZSH"
+  else
+    ZSHGUY_TEST_SETUP_STATE="setup failed $ZSHGUY_PLUGIN_ZSH"
+  fi
+elif [[ -f "$ZSHGUY_SH" ]]; then
   if source "$ZSHGUY_SH"; then
     ZSHGUY_TEST_SETUP_STATE="loaded $ZSHGUY_SH"
   else
@@ -67,6 +74,88 @@ assert_helper_available() {
     fi
     return 1
   fi
+}
+
+test_plugin_entrypoint_exists() {
+  if [[ ! -f "$ZSHGUY_PLUGIN_ZSH" ]]; then
+    print -ru2 -- "FAIL: plugin entrypoint is missing"
+    print -ru2 -- "  path:    $ZSHGUY_PLUGIN_ZSH"
+    return 1
+  fi
+
+  if ! zsh -f -c '
+    source '"${(q)ZSHGUY_PLUGIN_ZSH}"' || exit 1
+    (( ${+functions[_zshguy_run_lms]} ))
+  '; then
+    print -ru2 -- "FAIL: plugin entrypoint did not load helpers"
+    print -ru2 -- "  path:    $ZSHGUY_PLUGIN_ZSH"
+    return 1
+  fi
+}
+
+test_compat_entrypoint_exists() {
+  if [[ ! -f "$ZSHGUY_SH" ]]; then
+    print -ru2 -- "FAIL: compat entrypoint is missing"
+    print -ru2 -- "  path:    $ZSHGUY_SH"
+    return 1
+  fi
+
+  if ! zsh -f -c '
+    source '"${(q)ZSHGUY_SH}"' || exit 1
+    (( ${+functions[_zshguy_run_lms]} ))
+  '; then
+    print -ru2 -- "FAIL: compat entrypoint did not load helpers"
+    print -ru2 -- "  path:    $ZSHGUY_SH"
+    return 1
+  fi
+}
+
+test_plugin_entrypoint_can_be_sourced_twice() {
+  if [[ ! -f "$ZSHGUY_PLUGIN_ZSH" ]]; then
+    print -ru2 -- "FAIL: plugin entrypoint is missing"
+    print -ru2 -- "  path:    $ZSHGUY_PLUGIN_ZSH"
+    return 1
+  fi
+
+  local plugin_load_state
+
+  plugin_load_state="$(
+    zsh -f -c '
+      source '"${(q)ZSHGUY_PLUGIN_ZSH}"' || exit 1
+      source '"${(q)ZSHGUY_PLUGIN_ZSH}"' || exit 1
+      if (( ! ${+functions[_zshguy_run_lms]} )); then
+        exit 2
+      fi
+      if (( ! ${+parameters[_zshguy_plugin_loaded]} )); then
+        exit 3
+      fi
+      print -r -- "${+functions[_zshguy_run_lms]} ${+parameters[_zshguy_plugin_loaded]}"
+    '
+  )" || {
+    print -ru2 -- "FAIL: plugin entrypoint source failed on repeated load"
+    print -ru2 -- "  path:    $ZSHGUY_PLUGIN_ZSH"
+    return 1
+  }
+
+  assert_eq "1 1" "$plugin_load_state" "plugin entrypoint repeated source keeps helpers available" || return 1
+
+}
+
+test_plugin_entrypoint_skips_widget_registration_in_non_interactive_shell() {
+  local widget_registration_state
+
+  widget_registration_state="$(
+    zsh -f -c '
+      source '"${(q)ZSHGUY_PLUGIN_ZSH}"' || exit 1
+      print -r -- "${+functions[_zshguy_run_lms]} ${+widgets[zshguy-widget]}"
+    '
+  )" || {
+    print -ru2 -- "FAIL: plugin entrypoint non-interactive load failed"
+    print -ru2 -- "  path:    $ZSHGUY_PLUGIN_ZSH"
+    return 1
+  }
+
+  assert_eq "1 0" "$widget_registration_state" "plugin entrypoint skips widget registration in non-interactive shell" || return 1
 }
 
 test_run_lms_with_model() {
@@ -862,6 +951,10 @@ run_test() {
 }
 
 main() {
+  run_test test_plugin_entrypoint_exists
+  run_test test_compat_entrypoint_exists
+  run_test test_plugin_entrypoint_can_be_sourced_twice
+  run_test test_plugin_entrypoint_skips_widget_registration_in_non_interactive_shell
   run_test test_run_lms_with_model
   run_test test_run_lms_without_model
   run_test test_build_lms_args
