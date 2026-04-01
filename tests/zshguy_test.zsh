@@ -397,6 +397,54 @@ test_run_lms_strips_think_block_and_trailing_tokens() {
   assert_eq "ls" "$lms_output" "run lms strips think block and trailing tokens" || return 1
 }
 
+test_run_lms_extracts_last_command_after_explanation_block() {
+  local lms_output
+  local ZSHGUY_MODEL="test-model"
+
+  if ! assert_helper_available _zshguy_run_lms "run lms"; then
+    return 1
+  fi
+
+  lms() {
+    print -r -- 'The user wants to list files in the current directory.'
+    print -r -- 'A simple ls command is appropriate.'
+    print -r -- ''
+    print -r -- '</think>'
+    print -r -- ''
+    print -r -- 'ls<|im_end|>'
+  }
+
+  if ! lms_output="$(_zshguy_run_lms "sys" "user")"; then
+    print -ru2 -- "FAIL: run lms explanation block extraction failed"
+    return 1
+  fi
+
+  assert_eq "ls" "$lms_output" "run lms extracts last command after explanation block" || return 1
+}
+
+test_run_lms_extracts_last_command_with_arguments_after_explanation() {
+  local lms_output
+  local ZSHGUY_MODEL="test-model"
+
+  if ! assert_helper_available _zshguy_run_lms "run lms"; then
+    return 1
+  fi
+
+  lms() {
+    print -r -- 'The user wants shell files only.'
+    print -r -- 'Use find with a name filter.'
+    print -r -- ''
+    print -r -- "find . -type f -name '*.sh'<|im_end|>"
+  }
+
+  if ! lms_output="$(_zshguy_run_lms "sys" "user")"; then
+    print -ru2 -- "FAIL: run lms explanation extraction with arguments failed"
+    return 1
+  fi
+
+  assert_eq "find . -type f -name '*.sh'" "$lms_output" "run lms extracts last command with arguments after explanation" || return 1
+}
+
 test_run_lms_rejects_multiline_postamble() {
   local lms_status_file
   local lms_status=0
@@ -424,7 +472,7 @@ test_run_lms_rejects_multiline_postamble() {
   rm -f "$lms_status_file"
 
   assert_eq "1" "$lms_status" "run lms multiline postamble status" || return 1
-  assert_eq "" "$lms_output" "run lms rejects multiline postamble output" || return 1
+  assert_eq "model output was rejected by validation" "$lms_output" "run lms rejects multiline postamble output" || return 1
 }
 
 test_mode_for_buffer() {
@@ -544,6 +592,36 @@ test_handle_generation_error_preserves_buffer_and_cursor() {
   assert_eq "4" "$CURSOR" "cursor after generation error" || return 1
 }
 
+test_generation_error_message_uses_single_line() {
+  local message
+
+  if ! assert_helper_available _zshguy_generation_error_message "generation error message"; then
+    return 1
+  fi
+
+  if ! message="$(_zshguy_generation_error_message "boom")"; then
+    print -ru2 -- "FAIL: generation error message helper invocation failed"
+    return 1
+  fi
+
+  assert_eq "[zshguy] lms failed: boom. Continue typing to dismiss." "$message" "generation error message should stay on one line" || return 1
+}
+
+test_redraw_widget_uses_refresh() {
+  local redraw_widget
+
+  if ! assert_helper_available _zshguy_redraw_widget "redraw widget"; then
+    return 1
+  fi
+
+  if ! redraw_widget="$(_zshguy_redraw_widget)"; then
+    print -ru2 -- "FAIL: redraw widget helper invocation failed"
+    return 1
+  fi
+
+  assert_eq "-R" "$redraw_widget" "redraw prompt should use zle -R" || return 1
+}
+
 test_run_lms_failure_returns_stderr() {
   local lms_status_file
   local lms_status=0
@@ -572,6 +650,86 @@ test_run_lms_failure_returns_stderr() {
 
   assert_eq "1" "$lms_status" "run lms failure status" || return 1
   assert_eq "boom" "$lms_output" "run lms failure returns stderr" || return 1
+}
+
+test_run_lms_validation_failure_returns_message() {
+  local lms_status_file
+  local lms_status=0
+  local lms_output
+  local ZSHGUY_MODEL="test-model"
+
+  if ! assert_helper_available _zshguy_run_lms "run lms"; then
+    return 1
+  fi
+
+  lms() {
+    print -r -- 'ls -l'
+    print -r -- 'This command lists files'
+  }
+
+  lms_status_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-lms-status.XXXXXX")" || return 1
+  lms_output="$({
+    if _zshguy_run_lms "sys" "user"; then
+      print -r -- 0 >"$lms_status_file"
+    else
+      print -r -- $? >"$lms_status_file"
+    fi
+  })"
+  lms_status="$(<"$lms_status_file")"
+  rm -f "$lms_status_file"
+
+  assert_eq "1" "$lms_status" "run lms validation failure status" || return 1
+  assert_eq "model output was rejected by validation" "$lms_output" "run lms validation failure returns message" || return 1
+}
+
+test_run_lms_validation_failure_emits_debug_output() {
+  local lms_status_file
+  local lms_output_file
+  local debug_output_file
+  local lms_status=0
+  local lms_output
+  local debug_output
+  local ZSHGUY_MODEL="test-model"
+  local ZSHGUY_DEBUG=1
+
+  if ! assert_helper_available _zshguy_run_lms "run lms"; then
+    return 1
+  fi
+
+  lms() {
+    print -r -- 'ls -l'
+    print -r -- 'This command lists files'
+  }
+
+  lms_status_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-lms-status.XXXXXX")" || return 1
+  lms_output_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-lms-output.XXXXXX")" || return 1
+  debug_output_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-lms-debug.XXXXXX")" || return 1
+  {
+    if _zshguy_run_lms "sys" "user" >"$lms_output_file" 2>"$debug_output_file"; then
+      print -r -- 0 >"$lms_status_file"
+    else
+      print -r -- $? >"$lms_status_file"
+    fi
+  }
+  lms_status="$(<"$lms_status_file")"
+  lms_output="$(<"$lms_output_file")"
+  debug_output="$(<"$debug_output_file")"
+  rm -f "$lms_status_file"
+  rm -f "$lms_output_file"
+  rm -f "$debug_output_file"
+
+  assert_eq "1" "$lms_status" "run lms validation failure debug status" || return 1
+  assert_eq "model output was rejected by validation" "$lms_output" "run lms validation failure debug message" || return 1
+  if [[ "$debug_output" != *"[zshguy debug] raw output: "* ]]; then
+    print -ru2 -- "FAIL: validation failure debug output missing raw output"
+    print -ru2 -- "  actual:   $debug_output"
+    return 1
+  fi
+  if [[ "$debug_output" != *"[zshguy debug] normalized output: "* ]]; then
+    print -ru2 -- "FAIL: validation failure debug output missing normalized output"
+    print -ru2 -- "  actual:   $debug_output"
+    return 1
+  fi
 }
 
 test_widget_skips_empty_prompt_without_mutation() {
@@ -926,7 +1084,7 @@ test_delete_guard_allows_query_deletion() {
   fi
 
   zle() {
-    if [[ "$1" != "zshguy-orig-backward-delete-char" ]]; then
+    if [[ "$1" != ".backward-delete-char" ]]; then
       print -ru2 -- "FAIL: unexpected zle widget"
       print -ru2 -- "  actual:   $1"
       return 1
@@ -936,7 +1094,7 @@ test_delete_guard_allows_query_deletion() {
   }
 
   typeset -g _zshguy_state="collecting_prompt"
-  typeset -g _zshguy_orig_backward_delete_char_widget="zshguy-orig-backward-delete-char"
+  typeset -g _zshguy_orig_backward_delete_char_widget=".backward-delete-char"
 
   if ! _zshguy_backward_delete_char; then
     print -ru2 -- "FAIL: backward delete invocation failed for query content"
@@ -957,7 +1115,7 @@ test_delete_guard_preserves_prefix_for_line_and_word_kills() {
 
   zle() {
     case "$1" in
-      zshguy-orig-backward-kill-word|zshguy-orig-kill-whole-line)
+      .backward-kill-word|.kill-whole-line)
         BUFFER=""
         CURSOR=0
         ;;
@@ -970,8 +1128,8 @@ test_delete_guard_preserves_prefix_for_line_and_word_kills() {
   }
 
   typeset -g _zshguy_state="collecting_prompt"
-  typeset -g _zshguy_orig_backward_kill_word_widget="zshguy-orig-backward-kill-word"
-  typeset -g _zshguy_orig_kill_whole_line_widget="zshguy-orig-kill-whole-line"
+  typeset -g _zshguy_orig_backward_kill_word_widget=".backward-kill-word"
+  typeset -g _zshguy_orig_kill_whole_line_widget=".kill-whole-line"
 
   if ! _zshguy_backward_kill_word; then
     print -ru2 -- "FAIL: backward kill word invocation failed"
@@ -1007,14 +1165,14 @@ test_delete_guard_falls_through_outside_prompt_mode() {
   }
 
   typeset -g _zshguy_state=""
-  typeset -g _zshguy_orig_backward_delete_char_widget="zshguy-orig-backward-delete-char"
+  typeset -g _zshguy_orig_backward_delete_char_widget=".backward-delete-char"
 
   if ! _zshguy_backward_delete_char; then
     print -ru2 -- "FAIL: backward delete fallthrough invocation failed"
     return 1
   fi
 
-  assert_eq "zshguy-orig-backward-delete-char" "$zle_widget_called" "backward delete fallthrough widget" || return 1
+  assert_eq ".backward-delete-char" "$zle_widget_called" "backward delete fallthrough widget" || return 1
 }
 
 test_widget_registers_in_interactive_shell() {
@@ -1043,6 +1201,19 @@ test_widget_registration_preserves_original_widgets() {
   assert_eq "1 1" "$registration_state" "widget registration preserves original widgets" || return 1
 }
 
+test_widget_registration_uses_builtin_fallback_for_builtin_delete() {
+  local registration_state
+
+  registration_state="$(
+    zsh -f -ic "source ${(q)ZSHGUY_PLUGIN_ZSH}; print -r -- \$_zshguy_orig_backward_delete_char_widget"
+  )" || {
+    print -ru2 -- "FAIL: builtin delete fallback registration check failed"
+    return 1
+  }
+
+  assert_eq ".backward-delete-char" "$registration_state" "widget registration uses builtin fallback for backward delete" || return 1
+}
+
 run_test() {
   local test_name=$1
 
@@ -1069,6 +1240,8 @@ main() {
   run_test test_run_lms_preserves_special_characters
   run_test test_run_lms_strips_markdown_fences
   run_test test_run_lms_strips_think_block_and_trailing_tokens
+  run_test test_run_lms_extracts_last_command_after_explanation_block
+  run_test test_run_lms_extracts_last_command_with_arguments_after_explanation
   run_test test_run_lms_rejects_multiline_postamble
   run_test test_mode_for_buffer
   run_test test_extract_prompt_query
@@ -1076,7 +1249,11 @@ main() {
   run_test test_restore_prompt_prefix_boundary_uses_literal_prefix
   run_test test_apply_insert
   run_test test_handle_generation_error_preserves_buffer_and_cursor
+  run_test test_generation_error_message_uses_single_line
+  run_test test_redraw_widget_uses_refresh
   run_test test_run_lms_failure_returns_stderr
+  run_test test_run_lms_validation_failure_returns_message
+  run_test test_run_lms_validation_failure_emits_debug_output
   run_test test_widget_uses_command_generation_flow_for_empty_buffer
   run_test test_widget_uses_insert_flow_for_existing_input
   run_test test_widget_shows_inline_generation_display_and_defers_buffer_mutation_until_success
@@ -1088,6 +1265,7 @@ main() {
   run_test test_delete_guard_falls_through_outside_prompt_mode
   run_test test_widget_registers_in_interactive_shell
   run_test test_widget_registration_preserves_original_widgets
+  run_test test_widget_registration_uses_builtin_fallback_for_builtin_delete
   run_test test_widget_skips_empty_prompt_without_mutation
 
   print -r -- ""

@@ -132,6 +132,16 @@ export ZSHGUY_MODEL=llama-3.1-8b-instruct
 
 If `ZSHGUY_MODEL` is unset, `lms chat` uses its default model.
 
+## Debugging
+
+To inspect model output rejected by validation, enable debug mode:
+
+```zsh
+export ZSHGUY_DEBUG=1
+```
+
+When validation fails, `zshguy` will print the raw output and normalized output to `stderr`.
+
 
 ## License
 

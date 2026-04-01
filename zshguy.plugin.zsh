@@ -11,23 +11,14 @@ source "${${(%):-%N}:A:h}/lib/zshguy-core.zsh" || return 1
 
 if [[ -o interactive ]]; then
   _zshguy_clear_state
-  typeset -g _zshguy_orig_accept_line_widget="zshguy-orig-accept-line"
-  typeset -g _zshguy_orig_send_break_widget="zshguy-orig-send-break"
-  typeset -g _zshguy_orig_backward_delete_char_widget="zshguy-orig-backward-delete-char"
-  typeset -g _zshguy_orig_vi_backward_delete_char_widget="zshguy-orig-vi-backward-delete-char"
-  typeset -g _zshguy_orig_backward_kill_word_widget="zshguy-orig-backward-kill-word"
-  typeset -g _zshguy_orig_vi_backward_kill_word_widget="zshguy-orig-vi-backward-kill-word"
-  typeset -g _zshguy_orig_backward_kill_line_widget="zshguy-orig-backward-kill-line"
-  typeset -g _zshguy_orig_kill_whole_line_widget="zshguy-orig-kill-whole-line"
-
-  zle -A accept-line "$_zshguy_orig_accept_line_widget"
-  zle -A send-break "$_zshguy_orig_send_break_widget"
-  zle -A backward-delete-char "$_zshguy_orig_backward_delete_char_widget"
-  zle -A vi-backward-delete-char "$_zshguy_orig_vi_backward_delete_char_widget"
-  zle -A backward-kill-word "$_zshguy_orig_backward_kill_word_widget"
-  zle -A vi-backward-kill-word "$_zshguy_orig_vi_backward_kill_word_widget"
-  zle -A backward-kill-line "$_zshguy_orig_backward_kill_line_widget"
-  zle -A kill-whole-line "$_zshguy_orig_kill_whole_line_widget"
+  _zshguy_capture_original_widget accept-line zshguy-orig-accept-line _zshguy_orig_accept_line_widget || return 1
+  _zshguy_capture_original_widget send-break zshguy-orig-send-break _zshguy_orig_send_break_widget || return 1
+  _zshguy_capture_original_widget backward-delete-char zshguy-orig-backward-delete-char _zshguy_orig_backward_delete_char_widget || return 1
+  _zshguy_capture_original_widget vi-backward-delete-char zshguy-orig-vi-backward-delete-char _zshguy_orig_vi_backward_delete_char_widget || return 1
+  _zshguy_capture_original_widget backward-kill-word zshguy-orig-backward-kill-word _zshguy_orig_backward_kill_word_widget || return 1
+  _zshguy_capture_original_widget vi-backward-kill-word zshguy-orig-vi-backward-kill-word _zshguy_orig_vi_backward_kill_word_widget || return 1
+  _zshguy_capture_original_widget backward-kill-line zshguy-orig-backward-kill-line _zshguy_orig_backward_kill_line_widget || return 1
+  _zshguy_capture_original_widget kill-whole-line zshguy-orig-kill-whole-line _zshguy_orig_kill_whole_line_widget || return 1
 
   zle -N zshguy-widget _zshguy_widget
   zle -N zshguy-accept-line _zshguy_accept_line

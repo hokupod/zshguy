@@ -39,6 +39,7 @@ _zshguy_run_lms() {
   local lms_output
   local lms_stderr_file
   local lms_stderr
+  local normalized_output
 
   lms_args="$(_zshguy_build_lms_args "$system_prompt" "$user_prompt")" || return 1
   lms_argv=("${(@Q)${(z)lms_args}}")
@@ -56,9 +57,26 @@ _zshguy_run_lms() {
 
   command rm -f "$lms_stderr_file"
 
-  lms_output="$(_zshguy_normalize_model_output "$lms_output")" || return 1
-  _zshguy_validate_model_output "$lms_output" || return 1
-  print -r -- "$lms_output"
+  normalized_output="$(_zshguy_normalize_model_output "$lms_output")" || return 1
+  if ! _zshguy_validate_model_output "$normalized_output"; then
+    _zshguy_debug_validation_failure "$lms_output" "$normalized_output"
+    print -r -- "model output was rejected by validation"
+    return 1
+  fi
+  print -r -- "$normalized_output"
+}
+
+_zshguy_debug_validation_failure() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  [[ ${ZSHGUY_DEBUG-} == 1 ]] || return 0
+
+  local raw_output=${1-}
+  local normalized_output=${2-}
+
+  print -ru2 -- "[zshguy debug] raw output: ${raw_output}"
+  print -ru2 -- "[zshguy debug] normalized output: ${normalized_output}"
 }
 
 _zshguy_normalize_model_output() {
@@ -66,6 +84,7 @@ _zshguy_normalize_model_output() {
   setopt local_options no_unset
 
   local raw_output=${1-}
+  local extracted_command
   local line
   local -i in_think=0
   local -a lines
@@ -91,6 +110,12 @@ _zshguy_normalize_model_output() {
     fi
 
     line="${line//<|im_end|>/}"
+    line="$(_zshguy_trim_whitespace "$line")" || return 1
+
+    if [[ "$line" == '</think>' ]]; then
+      continue
+    fi
+
     cleaned_lines+=("$line")
   done
 
@@ -108,7 +133,64 @@ _zshguy_normalize_model_output() {
     cleaned_lines=("${cleaned_lines[@]:1:${#cleaned_lines[@]}-2}")
   fi
 
+  if (( ${#cleaned_lines[@]} > 1 )); then
+    extracted_command="$(_zshguy_extract_last_command_candidate "${cleaned_lines[@]}")" || return 1
+    if [[ -n "$extracted_command" ]]; then
+      print -r -- "$extracted_command"
+      return 0
+    fi
+  fi
+
   print -r -- "${(F)cleaned_lines}"
+}
+
+_zshguy_trim_whitespace() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local value=${1-}
+
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  print -r -- "$value"
+}
+
+_zshguy_is_command_candidate() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local line
+
+  line="$(_zshguy_trim_whitespace "${1-}")" || return 1
+
+  [[ -n "$line" ]] || return 1
+  [[ "$line" != *'```'* ]] || return 1
+  [[ "$line" != *'<think>'* ]] || return 1
+  [[ "$line" != *'</think>'* ]] || return 1
+  [[ "$line" != *'<|im_end|>'* ]] || return 1
+  [[ ! "$line" =~ '^(The|This|That|These|Those|Here|There|I|You|We|It|They|A|An)[[:space:]]' ]] || return 1
+  [[ ! "$line" =~ '[.!?]$' ]] || return 1
+  [[ "$line" =~ '^([A-Z_][A-Z0-9_]*=[^[:space:]]+[[:space:]]+)*([a-z0-9_./-]+)([[:space:]].*)?$' ]] || return 1
+
+  return 0
+}
+
+_zshguy_extract_last_command_candidate() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local line
+  local -a candidate_lines
+
+  candidate_lines=("$@")
+
+  line="$(_zshguy_trim_whitespace "${candidate_lines[-1]-}")" || return 1
+  if _zshguy_is_command_candidate "$line"; then
+    print -r -- "$line"
+    return 0
+  fi
+
+  return 0
 }
 
 _zshguy_validate_model_output() {
@@ -142,18 +224,27 @@ _zshguy_handle_generation_error() {
   setopt local_options no_unset
 
   local error_message=${1-}
+  local message
 
   [[ -o zle ]] || return 0
 
-  if [[ -n "$error_message" ]]; then
-    zle -M "[zshguy] lms failed: $error_message
-Continue typing to dismiss."
-  else
-    zle -M "[zshguy] lms failed: unknown error
-Continue typing to dismiss."
-  fi
+  message="$(_zshguy_generation_error_message "$error_message")" || return 1
+  zle -M "$message"
 
   return 0
+}
+
+_zshguy_generation_error_message() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local error_message=${1-}
+
+  if [[ -n "$error_message" ]]; then
+    print -r -- "[zshguy] lms failed: $error_message. Continue typing to dismiss."
+  else
+    print -r -- "[zshguy] lms failed: unknown error. Continue typing to dismiss."
+  fi
 }
 
 _zshguy_build_command_generation_system_prompt() {
@@ -273,7 +364,14 @@ _zshguy_redraw_prompt() {
 
   [[ -o zle ]] || return 0
 
-  zle reset-prompt
+  zle "$(_zshguy_redraw_widget)"
+}
+
+_zshguy_redraw_widget() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  print -r -- "-R"
 }
 
 _zshguy_restore_prompt_prefix_boundary() {
@@ -332,6 +430,31 @@ _zshguy_original_widget_name() {
       return 1
       ;;
   esac
+}
+
+_zshguy_capture_original_widget() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local widget_name=${1-}
+  local backup_widget_name=${2-}
+  local target_parameter_name=${3-}
+  local widget_kind=${widgets[$widget_name]-}
+  local resolved_widget_name
+
+  if [[ $widget_kind == "builtin" ]]; then
+    resolved_widget_name=".$widget_name"
+  else
+    zle -A "$widget_name" "$backup_widget_name" || return 1
+    resolved_widget_name="$backup_widget_name"
+  fi
+
+  if [[ -n $target_parameter_name ]]; then
+    typeset -g "$target_parameter_name=$resolved_widget_name"
+    return 0
+  fi
+
+  print -r -- "$resolved_widget_name"
 }
 
 _zshguy_call_original_widget() {
