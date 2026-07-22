@@ -432,6 +432,35 @@ _zshguy_original_widget_name() {
   esac
 }
 
+_zshguy_autosuggest_original_widget_name() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local widget_name=${1-}
+  local widget_kind=${2-}
+  local bound_prefix="user:_zsh_autosuggest_bound_"
+  local binding
+  local bind_count
+  local bound_widget_name
+  local original_prefix
+  local original_widget_name
+
+  [[ $widget_kind == "$bound_prefix"* ]] || return 1
+
+  binding=${widget_kind#$bound_prefix}
+  bind_count=${binding%%_*}
+  bound_widget_name=${binding#*_}
+
+  [[ $bind_count == <-> ]] || return 1
+  [[ $bound_widget_name == "$widget_name" ]] || return 1
+
+  original_prefix=${ZSH_AUTOSUGGEST_ORIGINAL_WIDGET_PREFIX:-autosuggest-orig-}
+  original_widget_name="${original_prefix}${bind_count}-${widget_name}"
+  (( ${+widgets[$original_widget_name]} )) || return 1
+
+  print -r -- "$original_widget_name"
+}
+
 _zshguy_capture_original_widget() {
   emulate -L zsh
   setopt local_options no_unset
@@ -439,13 +468,27 @@ _zshguy_capture_original_widget() {
   local widget_name=${1-}
   local backup_widget_name=${2-}
   local target_parameter_name=${3-}
+  local source_widget_name=$widget_name
   local widget_kind=${widgets[$widget_name]-}
+  local autosuggest_original_widget
   local resolved_widget_name
+  local -i unwrapped_autosuggest=0
+
+  # Autosuggestions rebinds on every precmd. Keep its saved original instead
+  # of capturing the active outer wrapper and creating a nested wrapper chain.
+  if autosuggest_original_widget="$(_zshguy_autosuggest_original_widget_name "$widget_name" "$widget_kind")"; then
+    source_widget_name=$autosuggest_original_widget
+    widget_kind=${widgets[$source_widget_name]-}
+    unwrapped_autosuggest=1
+  fi
 
   if [[ $widget_kind == "builtin" ]]; then
     resolved_widget_name=".$widget_name"
+  elif (( unwrapped_autosuggest )) &&
+    [[ $widget_kind == "user:_zsh_autosuggest_orig_$widget_name" ]]; then
+    resolved_widget_name=".$widget_name"
   else
-    zle -A "$widget_name" "$backup_widget_name" || return 1
+    zle -A "$source_widget_name" "$backup_widget_name" || return 1
     resolved_widget_name="$backup_widget_name"
   fi
 

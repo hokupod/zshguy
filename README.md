@@ -142,6 +142,15 @@ export ZSHGUY_DEBUG=1
 
 When validation fails, `zshguy` will print the raw output and normalized output to `stderr`.
 
+## Testing
+
+Run the unit tests and interactive ZLE integration tests:
+
+```zsh
+zsh tests/run.zsh
+```
+
+The integration tests cover both startup loading and sourcing `zshguy` after other ZLE plugins have already initialized.
 
 ## License
 

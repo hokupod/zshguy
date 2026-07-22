@@ -1214,6 +1214,46 @@ test_widget_registration_uses_builtin_fallback_for_builtin_delete() {
   assert_eq ".backward-delete-char" "$registration_state" "widget registration uses builtin fallback for backward delete" || return 1
 }
 
+test_widget_registration_unwraps_autosuggest_user_widget() {
+  local registration_state
+
+  registration_state="$(
+    zsh -f -ic "
+      _zshguy_test_accept_line() { return 0; }
+      _zsh_autosuggest_bound_3_accept-line() { return 0; }
+      zle -N autosuggest-orig-3-accept-line _zshguy_test_accept_line
+      zle -N accept-line _zsh_autosuggest_bound_3_accept-line
+      source ${(q)ZSHGUY_PLUGIN_ZSH}
+      print -r -- \$_zshguy_orig_accept_line_widget \${widgets[zshguy-orig-accept-line]}
+    "
+  )" || {
+    print -ru2 -- "FAIL: autosuggest user widget unwrapping check failed"
+    return 1
+  }
+
+  assert_eq "zshguy-orig-accept-line user:_zshguy_test_accept_line" "$registration_state" "widget registration unwraps autosuggest user widget" || return 1
+}
+
+test_widget_registration_unwraps_autosuggest_builtin_proxy() {
+  local registration_state
+
+  registration_state="$(
+    zsh -f -ic "
+      _zsh_autosuggest_orig_backward-delete-char() { zle .backward-delete-char; }
+      _zsh_autosuggest_bound_3_backward-delete-char() { return 0; }
+      zle -N autosuggest-orig-3-backward-delete-char _zsh_autosuggest_orig_backward-delete-char
+      zle -N backward-delete-char _zsh_autosuggest_bound_3_backward-delete-char
+      source ${(q)ZSHGUY_PLUGIN_ZSH}
+      print -r -- \$_zshguy_orig_backward_delete_char_widget \${+widgets[zshguy-orig-backward-delete-char]}
+    "
+  )" || {
+    print -ru2 -- "FAIL: autosuggest builtin proxy unwrapping check failed"
+    return 1
+  }
+
+  assert_eq ".backward-delete-char 0" "$registration_state" "widget registration unwraps autosuggest builtin proxy" || return 1
+}
+
 run_test() {
   local test_name=$1
 
@@ -1266,6 +1306,8 @@ main() {
   run_test test_widget_registers_in_interactive_shell
   run_test test_widget_registration_preserves_original_widgets
   run_test test_widget_registration_uses_builtin_fallback_for_builtin_delete
+  run_test test_widget_registration_unwraps_autosuggest_user_widget
+  run_test test_widget_registration_unwraps_autosuggest_builtin_proxy
   run_test test_widget_skips_empty_prompt_without_mutation
 
   print -r -- ""
