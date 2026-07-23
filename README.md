@@ -120,6 +120,8 @@ bindkey '^X^G' zshguy-widget
 ## Usage
 
 Press your bound key, then enter a prompt at the `[zshguy]` prompt.
+The generated command is placed in the command buffer and is not executed automatically.
+Review it, then press Enter to execute it.
 
 ### Empty buffer
 
@@ -166,6 +168,12 @@ export ZSHGUY_MODEL=qwen3:4b
 ```
 
 `ZSHGUY_MODEL` is optional for LM Studio because `lms chat` can use its default model. It is required for Ollama.
+The Ollama CLI connects to `127.0.0.1:11434` by default. To use another host or port, set `OLLAMA_HOST`:
+
+```zsh
+export OLLAMA_HOST=127.0.0.1:12345
+```
+
 Ollama thinking output is hidden so only the generated command is passed to the widget.
 
 ## Debugging
