@@ -136,7 +136,7 @@ _verify_backward_delete() {
 _configure_zshguy_widget() {
   local session=$1
 
-  _zpty_write_line "$session" "lms() { print -r -- \"print -r -- '__GENERATED_''OK__'\"; }; bindkey '^X^J' zshguy-widget; bindkey '^G' send-break; print -r -- '__ZSHGUY_''READY__'" || return 1
+  _zpty_write_line "$session" "lms() { print -r -- \"print -r -- '__GENERATED_''OK__'\"; }; ollama() { print -r -- \"print -r -- '__OLLAMA_GENERATED_''OK__'\"; }; bindkey '^X^J' zshguy-widget; bindkey '^G' send-break; print -r -- '__ZSHGUY_''READY__'" || return 1
   _zpty_expect "$session" __ZSHGUY_READY__ "zshguy test binding" || return 1
   _zpty_expect "$session" __ZPTY_PROMPT__ "prompt after zshguy test binding"
 }
@@ -160,6 +160,19 @@ _verify_generation() {
   _zpty_write_raw "$session" $'\n' || return 1
   _zpty_expect "$session" __GENERATED_OK__ "generated command execution" || return 1
   _zpty_expect "$session" __ZPTY_PROMPT__ "prompt after generated command"
+}
+
+_verify_ollama_generation() {
+  local session=$1
+
+  _zpty_write_line "$session" "export ZSHGUY_BACKEND=ollama ZSHGUY_MODEL=test-model; print -r -- '__OLLAMA_''READY__'" || return 1
+  _zpty_expect "$session" __OLLAMA_READY__ "ollama backend configuration" || return 1
+  _zpty_expect "$session" __ZPTY_PROMPT__ "prompt after ollama backend configuration" || return 1
+  _zpty_write_raw "$session" $'\x18\x0a' || return 1
+  _zpty_write_line "$session" "generate an ollama marker" || return 1
+  _zpty_write_raw "$session" $'\n' || return 1
+  _zpty_expect "$session" __OLLAMA_GENERATED_OK__ "ollama generated command execution" || return 1
+  _zpty_expect "$session" __ZPTY_PROMPT__ "prompt after ollama generated command"
 }
 
 _verify_stack() {
@@ -235,6 +248,10 @@ _verify_stack() {
     return 1
   }
   _verify_generation "$session" || {
+    _zpty_stop "$session"
+    return 1
+  }
+  _verify_ollama_generation "$session" || {
     _zpty_stop "$session"
     return 1
   }

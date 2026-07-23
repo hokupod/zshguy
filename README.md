@@ -1,18 +1,19 @@
 # zshguy
 
-A zsh widget that generates commands from natural language using `lms`.
+A zsh widget that generates commands from natural language using LM Studio or Ollama.
 
 Type what you want to do in plain English, and `zshguy` asks the model for a zsh command or an insertion at the cursor position.
 
 ## Requirements
 
 - `zsh` only
-- `lms` command from [LM Studio](https://lmstudio.ai/)
-- LM Studio must be started once and finish its first-run setup before `lms` will work reliably
+- One local model backend:
+  - `lms` from [LM Studio](https://lmstudio.ai/)
+  - `ollama` from [Ollama](https://ollama.com/)
 
 ### Preflight
 
-Run these steps before using the widget:
+For LM Studio, complete its first-run setup and run:
 
 ```zsh
 # Check LMS CLI availability
@@ -24,7 +25,20 @@ lms chat -p "ping"
 
 If you set `ZSHGUY_MODEL`, run `lms chat "$ZSHGUY_MODEL" -p "ping"` instead.
 
-### Model setup (example: `qwen/qwen3.5-9b`)
+For Ollama, start the server and run:
+
+```zsh
+# Check Ollama CLI and server availability
+ollama --version
+
+# Confirm installed model names
+ollama list
+
+# Verify generation
+ollama run qwen3:4b "ping"
+```
+
+### LM Studio model setup (example: `qwen/qwen3.5-9b`)
 
 `qwen/qwen3.5-9b` is an example model name. Replace it with the model key you want to use.
 
@@ -45,6 +59,19 @@ lms chat qwen/qwen3.5-9b -p "ping"
 ```
 
 If you omit the model/key argument for `lms get` or `lms load`, LM Studio opens an interactive selector.
+
+### Ollama model setup (example: `qwen3:4b`)
+
+```zsh
+# Download model
+ollama pull qwen3:4b
+
+# Confirm local model name
+ollama list
+
+# Verify generation
+ollama run qwen3:4b "ping"
+```
 
 ## Installation
 
@@ -122,15 +149,24 @@ main
 
 If the prompt is empty or generation fails, the current buffer stays unchanged.
 
-## Changing the Model
+## Backend and Model
 
-Set `ZSHGUY_MODEL` to choose a different LM Studio model name:
+LM Studio is the default backend. Existing configurations continue to work without `ZSHGUY_BACKEND`:
 
 ```zsh
+export ZSHGUY_BACKEND=lms
 export ZSHGUY_MODEL=llama-3.1-8b-instruct
 ```
 
-If `ZSHGUY_MODEL` is unset, `lms chat` uses its default model.
+For Ollama, set the backend and an installed model name:
+
+```zsh
+export ZSHGUY_BACKEND=ollama
+export ZSHGUY_MODEL=qwen3:4b
+```
+
+`ZSHGUY_MODEL` is optional for LM Studio because `lms chat` can use its default model. It is required for Ollama.
+Ollama thinking output is hidden so only the generated command is passed to the widget.
 
 ## Debugging
 
@@ -140,7 +176,7 @@ To inspect model output rejected by validation, enable debug mode:
 export ZSHGUY_DEBUG=1
 ```
 
-When validation fails, `zshguy` will print the raw output and normalized output to `stderr`.
+When validation fails, `zshguy` prints the raw output and normalized output to `stderr`.
 
 ## Testing
 

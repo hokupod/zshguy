@@ -1,5 +1,12 @@
 # zshguy-core.zsh - shared helper and widget implementation
 
+_zshguy_backend() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  print -r -- "${ZSHGUY_BACKEND:-lms}"
+}
+
 _zshguy_build_lms_args() {
   emulate -L zsh
   setopt local_options no_unset
@@ -17,6 +24,39 @@ _zshguy_build_lms_args() {
   print -r -- "${(@q)lms_args}"
 }
 
+_zshguy_build_ollama_prompt() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local system_prompt=$1
+  local user_prompt=$2
+
+  print -r -- "${system_prompt}
+
+User request:
+${user_prompt}"
+}
+
+_zshguy_build_ollama_args() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local system_prompt=$1
+  local user_prompt=$2
+  local ollama_prompt
+  local -a ollama_args
+
+  if [[ -z ${ZSHGUY_MODEL-} ]]; then
+    print -r -- "ZSHGUY_MODEL is required when ZSHGUY_BACKEND=ollama"
+    return 1
+  fi
+
+  ollama_prompt="$(_zshguy_build_ollama_prompt "$system_prompt" "$user_prompt")" || return 1
+  ollama_args=(run "$ZSHGUY_MODEL" "$ollama_prompt" --hidethinking)
+
+  print -r -- "${(@q)ollama_args}"
+}
+
 _zshguy_mode_for_buffer() {
   emulate -L zsh
   setopt local_options no_unset
@@ -28,6 +68,42 @@ _zshguy_mode_for_buffer() {
   fi
 }
 
+_zshguy_run_model_command() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local model_command=$1
+  local model_args=$2
+  local -a model_argv
+  local model_output
+  local model_stderr_file
+  local model_stderr
+  local normalized_output
+
+  model_argv=("${(@Q)${(z)model_args}}")
+
+  model_stderr_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-model-stderr.XXXXXX")" || return 1
+
+  if ! model_output="$("$model_command" "${model_argv[@]}" 2>"$model_stderr_file")"; then
+    model_stderr="$(<"$model_stderr_file")"
+    command rm -f "$model_stderr_file"
+    model_stderr="${model_stderr%%$'\n'*}"
+    model_stderr="${model_stderr%$'\r'}"
+    print -r -- "$model_stderr"
+    return 1
+  fi
+
+  command rm -f "$model_stderr_file"
+
+  normalized_output="$(_zshguy_normalize_model_output "$model_output")" || return 1
+  if ! _zshguy_validate_model_output "$normalized_output"; then
+    _zshguy_debug_validation_failure "$model_output" "$normalized_output"
+    print -r -- "model output was rejected by validation"
+    return 1
+  fi
+  print -r -- "$normalized_output"
+}
+
 _zshguy_run_lms() {
   emulate -L zsh
   setopt local_options no_unset
@@ -35,35 +111,51 @@ _zshguy_run_lms() {
   local system_prompt=$1
   local user_prompt=$2
   local lms_args
-  local -a lms_argv
-  local lms_output
-  local lms_stderr_file
-  local lms_stderr
-  local normalized_output
 
-  lms_args="$(_zshguy_build_lms_args "$system_prompt" "$user_prompt")" || return 1
-  lms_argv=("${(@Q)${(z)lms_args}}")
-
-  lms_stderr_file="$(mktemp "${TMPDIR:-/tmp}/zshguy-lms-stderr.XXXXXX")" || return 1
-
-  if ! lms_output="$(lms "${lms_argv[@]}" 2>"$lms_stderr_file")"; then
-    lms_stderr="$(<"$lms_stderr_file")"
-    command rm -f "$lms_stderr_file"
-    lms_stderr="${lms_stderr%%$'\n'*}"
-    lms_stderr="${lms_stderr%$'\r'}"
-    print -r -- "$lms_stderr"
+  if ! lms_args="$(_zshguy_build_lms_args "$system_prompt" "$user_prompt")"; then
+    print -r -- "$lms_args"
     return 1
   fi
+  _zshguy_run_model_command lms "$lms_args"
+}
 
-  command rm -f "$lms_stderr_file"
+_zshguy_run_ollama() {
+  emulate -L zsh
+  setopt local_options no_unset
 
-  normalized_output="$(_zshguy_normalize_model_output "$lms_output")" || return 1
-  if ! _zshguy_validate_model_output "$normalized_output"; then
-    _zshguy_debug_validation_failure "$lms_output" "$normalized_output"
-    print -r -- "model output was rejected by validation"
+  local system_prompt=$1
+  local user_prompt=$2
+  local ollama_args
+
+  if ! ollama_args="$(_zshguy_build_ollama_args "$system_prompt" "$user_prompt")"; then
+    print -r -- "$ollama_args"
     return 1
   fi
-  print -r -- "$normalized_output"
+  _zshguy_run_model_command ollama "$ollama_args"
+}
+
+_zshguy_run_model() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local system_prompt=$1
+  local user_prompt=$2
+  local backend
+
+  backend="$(_zshguy_backend)" || return 1
+
+  case "$backend" in
+    lms)
+      _zshguy_run_lms "$system_prompt" "$user_prompt"
+      ;;
+    ollama)
+      _zshguy_run_ollama "$system_prompt" "$user_prompt"
+      ;;
+    *)
+      print -r -- "unsupported ZSHGUY_BACKEND: $backend (expected lms or ollama)"
+      return 1
+      ;;
+  esac
 }
 
 _zshguy_debug_validation_failure() {
@@ -239,11 +331,12 @@ _zshguy_generation_error_message() {
   setopt local_options no_unset
 
   local error_message=${1-}
+  local backend=${ZSHGUY_BACKEND:-lms}
 
   if [[ -n "$error_message" ]]; then
-    print -r -- "[zshguy] lms failed: $error_message. Continue typing to dismiss."
+    print -r -- "[zshguy] $backend failed: $error_message. Continue typing to dismiss."
   else
-    print -r -- "[zshguy] lms failed: unknown error. Continue typing to dismiss."
+    print -r -- "[zshguy] $backend failed: unknown error. Continue typing to dismiss."
   fi
 }
 
@@ -587,7 +680,7 @@ _zshguy_accept_line() {
 
   local user_prompt
   local system_prompt
-  local lms_output
+  local model_output
 
   if [[ ${_zshguy_state-} != "collecting_prompt" ]]; then
     _zshguy_call_original_widget accept-line || return 1
@@ -615,19 +708,19 @@ _zshguy_accept_line() {
   _zshguy_show_generating_buffer "$user_prompt" || return 0
   _zshguy_redraw_prompt
 
-  if ! lms_output="$(_zshguy_run_lms "$system_prompt" "$user_prompt")"; then
+  if ! model_output="$(_zshguy_run_model "$system_prompt" "$user_prompt")"; then
     _zshguy_restore_saved_buffer
     _zshguy_clear_state
     _zshguy_redraw_prompt
-    _zshguy_handle_generation_error "$lms_output"
+    _zshguy_handle_generation_error "$model_output"
     return 1
   fi
 
   _zshguy_restore_saved_buffer
   if [[ ${_zshguy_saved_mode-} == "insert" ]]; then
-    _zshguy_apply_insert "$lms_output"
+    _zshguy_apply_insert "$model_output"
   else
-    BUFFER=$lms_output
+    BUFFER=$model_output
     CURSOR=${#BUFFER}
   fi
   _zshguy_clear_state
