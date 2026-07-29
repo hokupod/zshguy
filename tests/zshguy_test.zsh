@@ -141,6 +141,38 @@ test_plugin_entrypoint_can_be_sourced_twice() {
 
 }
 
+test_plugin_entrypoint_preserves_shell_options() {
+  local option_state
+
+  option_state="$(
+    zsh -f -c '
+      unsetopt nounset
+      setopt sh_word_split
+      source '"${(q)ZSHGUY_PLUGIN_ZSH}"' || exit 1
+      print -r -- "${options[nounset]} ${options[shwordsplit]}"
+    '
+  )" || {
+    print -ru2 -- "FAIL: plugin entrypoint failed with nounset disabled"
+    return 1
+  }
+
+  assert_eq "off on" "$option_state" "plugin entrypoint preserves disabled nounset and enabled shwordsplit" || return 1
+
+  option_state="$(
+    zsh -f -c '
+      setopt nounset
+      unsetopt sh_word_split
+      source '"${(q)ZSHGUY_PLUGIN_ZSH}"' || exit 1
+      print -r -- "${options[nounset]} ${options[shwordsplit]}"
+    '
+  )" || {
+    print -ru2 -- "FAIL: plugin entrypoint failed with nounset enabled"
+    return 1
+  }
+
+  assert_eq "on off" "$option_state" "plugin entrypoint preserves enabled nounset and disabled shwordsplit" || return 1
+}
+
 test_plugin_entrypoint_skips_widget_registration_in_non_interactive_shell() {
   local widget_registration_state
 
@@ -1439,6 +1471,7 @@ main() {
   run_test test_plugin_entrypoint_exists
   run_test test_compat_entrypoint_exists
   run_test test_plugin_entrypoint_can_be_sourced_twice
+  run_test test_plugin_entrypoint_preserves_shell_options
   run_test test_plugin_entrypoint_skips_widget_registration_in_non_interactive_shell
   run_test test_run_lms_with_model
   run_test test_run_lms_without_model
