@@ -26,7 +26,8 @@ _zpty_start() {
   local session=$1
 
   ZPTY_OUTPUT=""
-  zpty -b -e "$session" env TERM=dumb PS1=__ZPTY_READY__ zsh -dfi || return 1
+  zpty -b -e "$session" env TERM=dumb PS1=__ZPTY_READY__ \
+    ZSHGUY_BACKEND=lms ZSHGUY_MODEL= ZSHGUY_BASE_URL= ZSHGUY_API_KEY= zsh -dfi || return 1
   ZPTY_SESSION=$session
   ZPTY_FD=$REPLY
 }
@@ -175,6 +176,19 @@ _verify_ollama_generation() {
   _zpty_expect "$session" __ZPTY_PROMPT__ "prompt after ollama generated command"
 }
 
+_verify_openai_generation() {
+  local session=$1
+
+  _zpty_write_line "$session" "curl() { local request=\$(cat); jq -cn --arg content \"print -r -- '__OPENAI_GENERATED_''OK__'\" '{choices:[{finish_reason:\"stop\",message:{content:\$content}}]}'; }; export ZSHGUY_BACKEND=openai ZSHGUY_MODEL=test-model ZSHGUY_BASE_URL=http://localhost:1234/v1; unset ZSHGUY_API_KEY; print -r -- '__OPENAI_''READY__'" || return 1
+  _zpty_expect "$session" __OPENAI_READY__ "openai backend configuration" || return 1
+  _zpty_expect "$session" __ZPTY_PROMPT__ "prompt after openai backend configuration" || return 1
+  _zpty_write_raw "$session" $'\x18\x0a' || return 1
+  _zpty_write_line "$session" "generate an openai marker" || return 1
+  _zpty_write_raw "$session" $'\n' || return 1
+  _zpty_expect "$session" __OPENAI_GENERATED_OK__ "openai generated command execution" || return 1
+  _zpty_expect "$session" __ZPTY_PROMPT__ "prompt after openai generated command"
+}
+
 _verify_stack() {
   local load_mode=$1
   local session="zshguy-${load_mode}"
@@ -252,6 +266,10 @@ _verify_stack() {
     return 1
   }
   _verify_ollama_generation "$session" || {
+    _zpty_stop "$session"
+    return 1
+  }
+  _verify_openai_generation "$session" || {
     _zpty_stop "$session"
     return 1
   }

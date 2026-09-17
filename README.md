@@ -1,15 +1,18 @@
 # zshguy
 
-A zsh widget that generates commands from natural language using LM Studio or Ollama.
+A zsh widget that generates commands from natural language using LM Studio, Ollama, or an OpenAI-compatible API.
 
 Type what you want to do in plain English, and `zshguy` asks the model for a zsh command or an insertion at the cursor position.
 
 ## Requirements
 
-- `zsh` only
-- One local model backend:
+- `zsh`
+- One model backend:
   - `lms` from [LM Studio](https://lmstudio.ai/)
   - `ollama` from [Ollama](https://ollama.com/)
+  - An OpenAI-compatible Chat Completions server, with `curl` and `jq` installed
+
+`curl` and `jq` are required only for the `openai` backend. LM Studio and Ollama CLI users do not need these additional dependencies.
 
 ### Preflight
 
@@ -176,6 +179,43 @@ export OLLAMA_HOST=127.0.0.1:12345
 
 Ollama thinking output is hidden so only the generated command is passed to the widget.
 
+### OpenAI-compatible API
+
+Install `curl` and `jq` with your system package manager, then verify availability:
+
+```zsh
+curl --version
+jq --version
+```
+
+Configure the API base URL and a model served by that endpoint:
+
+```zsh
+export ZSHGUY_BACKEND=openai
+export ZSHGUY_BASE_URL=http://localhost:1234/v1
+export ZSHGUY_MODEL=your-model-name
+
+# Set only if your server requires Bearer authentication:
+export ZSHGUY_API_KEY=your-api-key
+```
+
+| Variable | Meaning |
+| --- | --- |
+| `ZSHGUY_BASE_URL` | Required HTTP(S) API base URL, including any version prefix such as `/v1`. No default. |
+| `ZSHGUY_MODEL` | Required model identifier accepted by your server. |
+| `ZSHGUY_API_KEY` | Optional Bearer token. Leave unset or empty for servers without authentication. |
+
+`zshguy` appends `/chat/completions` to the base URL (a trailing slash is allowed).
+For example, the configuration above calls `http://localhost:1234/v1/chat/completions`.
+Use your provider's base URL for a hosted service. Only `ZSHGUY_API_KEY` is read; `OPENAI_API_KEY` is not used automatically.
+
+The backend sends system and user messages with `stream: false`, using the [Chat Completions API format](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create), and reads `choices[0].message.content` only when `choices[0].finish_reason` is `stop`.
+The server must support this format; Responses-only endpoints are not supported.
+Your prompt, current directory, and command text around the cursor (in insertion mode) are sent to the configured server.
+
+Connections time out after 10 seconds, with a 120-second limit for the entire request.
+HTTP errors, malformed responses, missing content, and responses marked as truncated or filtered leave the command buffer unchanged.
+
 ## Debugging
 
 To inspect model output rejected by validation, enable debug mode:
@@ -188,13 +228,14 @@ When validation fails, `zshguy` prints the raw output and normalized output to `
 
 ## Testing
 
-Run the unit tests and interactive ZLE integration tests:
+Run the unit tests and interactive ZLE integration tests (`curl` and `jq` must be installed):
 
 ```zsh
 zsh tests/run.zsh
 ```
 
 The integration tests cover both startup loading and sourcing `zshguy` after other ZLE plugins have already initialized.
+OpenAI-compatible backend tests use simulated responses and do not require a running server or API key.
 
 ## License
 

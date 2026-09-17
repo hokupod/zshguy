@@ -433,7 +433,7 @@ test_run_model_rejects_unknown_backend() {
     return 1
   fi
 
-  assert_eq "unsupported ZSHGUY_BACKEND: unknown (expected lms or ollama)" "$model_output" "run model rejects unknown backend" || return 1
+  assert_eq "unsupported ZSHGUY_BACKEND: unknown (expected lms, ollama, or openai)" "$model_output" "run model rejects unknown backend" || return 1
 }
 
 test_run_ollama_failure_returns_stderr() {

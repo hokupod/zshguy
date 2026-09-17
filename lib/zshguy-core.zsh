@@ -134,6 +134,78 @@ _zshguy_run_ollama() {
   _zshguy_run_model_command ollama "$ollama_args"
 }
 
+_zshguy_request_openai() {
+  emulate -L zsh
+  setopt local_options no_unset pipefail
+
+  local system_prompt=$1
+  local user_prompt=$2
+  local base_url=${ZSHGUY_BASE_URL-}
+  local api_key=${ZSHGUY_API_KEY-}
+  local auth_header=''
+  local dependency payload response content
+  local -a curl_args
+
+  for dependency in curl jq; do
+    if ! command -v "$dependency" >/dev/null 2>&1; then
+      print -ru2 -- "$dependency is required when ZSHGUY_BACKEND=openai"
+      return 1
+    fi
+  done
+  if [[ -z ${ZSHGUY_MODEL-} || -z $base_url ]]; then
+    print -ru2 -- "ZSHGUY_BASE_URL and ZSHGUY_MODEL are required when ZSHGUY_BACKEND=openai"
+    return 1
+  fi
+  if [[ $base_url != http://?* && $base_url != https://?* ]]; then
+    print -ru2 -- "ZSHGUY_BASE_URL must start with http:// or https://"
+    return 1
+  fi
+  if [[ $api_key == *$'\n'* || $api_key == *$'\r'* ]]; then
+    print -ru2 -- "ZSHGUY_API_KEY must not contain newlines"
+    return 1
+  fi
+
+  payload="$(jq -cn --arg model "$ZSHGUY_MODEL" \
+    --arg system "$system_prompt" --arg user "$user_prompt" \
+    '{model: $model, messages: [{role: "system", content: $system},
+      {role: "user", content: $user}], stream: false}')" || return 1
+
+  # Ignore user curl config so redirects, extra requests, or streaming options
+  # cannot change this request. Feed JSON on stdin to preserve it verbatim.
+  curl_args=(--disable --silent --show-error --fail --globoff
+    --proto '=http,https' --connect-timeout 10 --max-time 120
+    --header 'Content-Type: application/json')
+  if [[ -n $api_key ]]; then
+    auth_header="Authorization: Bearer $api_key"
+    curl_args+=(--header @/dev/fd/3)
+  fi
+  # Keep credentials out of argv; the shell closes this descriptor on all exits.
+  response="$(curl "${curl_args[@]}" --data-binary @- \
+    --url "${base_url%/}/chat/completions" 3<<< "$auth_header" <<< "$payload")" || return 1
+
+  # Accept one JSON response with textual content, never a partial completion.
+  if ! content="$(jq -ers '
+    select(length == 1) | .[0] | select(.error == null)
+    | .choices[0]
+    | select(.finish_reason == "stop")
+    | .message.content | select(type == "string" and length > 0)
+  ' <<< "$response" 2>/dev/null)"; then
+    print -ru2 -- "API response must contain a complete, non-empty choices[0].message.content string"
+    return 1
+  fi
+  print -r -- "$content"
+}
+
+_zshguy_run_openai() {
+  emulate -L zsh
+  setopt local_options no_unset
+
+  local -a request_args=("$1" "$2")
+  local serialized_args="${(@q)request_args}"
+
+  _zshguy_run_model_command _zshguy_request_openai "$serialized_args"
+}
+
 _zshguy_run_model() {
   emulate -L zsh
   setopt local_options no_unset
@@ -151,8 +223,11 @@ _zshguy_run_model() {
     ollama)
       _zshguy_run_ollama "$system_prompt" "$user_prompt"
       ;;
+    openai)
+      _zshguy_run_openai "$system_prompt" "$user_prompt"
+      ;;
     *)
-      print -r -- "unsupported ZSHGUY_BACKEND: $backend (expected lms or ollama)"
+      print -r -- "unsupported ZSHGUY_BACKEND: $backend (expected lms, ollama, or openai)"
       return 1
       ;;
   esac
